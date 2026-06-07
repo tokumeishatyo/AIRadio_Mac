@@ -2,6 +2,7 @@ import Foundation
 import AIRadioCore
 
 /// AppleScript でローカル Spotify.app を制御する `SpotifyController` 実装。
+/// 各操作は実績のある単一行スクリプト（`tell application "Spotify" to ...`）で行う。
 public struct AppleScriptSpotifyController: SpotifyController {
     private let runner: any AppleScriptRunner
 
@@ -27,32 +28,21 @@ public struct AppleScriptSpotifyController: SpotifyController {
     }
 
     public func playerState() async throws -> PlayerState {
-        let script = """
-        tell application "Spotify"
-        set st to player state as string
-        set pos to player position
-        set tid to ""
-        try
-        set tid to id of current track
-        end try
-        return st & "|" & tid & "|" & pos
-        end tell
-        """
-        let raw = try await runner.run(script)
-        return Self.parseState(raw)
-    }
+        // 複数行スクリプトは osascript の解釈で構文エラーになりやすいため、
+        // 単一行コマンドを 3 回に分けて取得する（再生・音量と同じ実績のある形）。
+        let stateRaw = try await runner.run(#"tell application "Spotify" to return player state as string"#)
+        let positionRaw = try await runner.run(#"tell application "Spotify" to return player position"#)
+        let trackRaw = (try? await runner.run(#"tell application "Spotify" to return id of current track"#)) ?? ""
 
-    /// `"<state>|<trackUri>|<position>"` 形式の文字列を `PlayerState` に変換する。
-    static func parseState(_ raw: String) -> PlayerState {
-        let parts = raw.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
         let state: PlaybackState
-        switch parts.first?.lowercased() {
+        switch stateRaw.trimmingCharacters(in: .whitespaces).lowercased() {
         case "playing": state = .playing
         case "paused": state = .paused
         default: state = .stopped
         }
-        let uri = (parts.count > 1 && !parts[1].isEmpty) ? parts[1] : nil
-        let position = parts.count > 2 ? (Double(parts[2].replacingOccurrences(of: ",", with: ".")) ?? 0) : 0
+        let trimmedTrack = trackRaw.trimmingCharacters(in: .whitespaces)
+        let uri = trimmedTrack.isEmpty ? nil : trimmedTrack
+        let position = Double(positionRaw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")) ?? 0
         return PlayerState(state: state, trackUri: uri, positionSeconds: position)
     }
 }

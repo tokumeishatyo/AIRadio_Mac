@@ -35,15 +35,36 @@ struct AppleScriptSpotifyControllerTests {
         #expect(runner.scripts[0].contains("pause"))
     }
 
+    @Test func allPlayerStateScriptsAreSingleLine() async throws {
+        let runner = FakeAppleScriptRunner(output: "playing")
+        let controller = AppleScriptSpotifyController(runner: runner)
+        _ = try await controller.playerState()
+        // playerState は単一行コマンドを 3 回（state / position / track id）
+        #expect(runner.scripts.count == 3)
+        for script in runner.scripts {
+            #expect(!script.contains("\n"))
+            #expect(script.hasPrefix(#"tell application "Spotify" to "#))
+        }
+    }
+
     @Test func playerStateParsesPlaying() async throws {
-        let runner = FakeAppleScriptRunner(output: "playing|spotify:track:abc|12.5")
+        let runner = FakeAppleScriptRunner { script in
+            if script.contains("player state") { return "playing" }
+            if script.contains("player position") { return "12.5" }
+            if script.contains("id of current track") { return "spotify:track:abc" }
+            return ""
+        }
         let controller = AppleScriptSpotifyController(runner: runner)
         let state = try await controller.playerState()
         #expect(state == PlayerState(state: .playing, trackUri: "spotify:track:abc", positionSeconds: 12.5))
     }
 
     @Test func playerStateParsesStoppedWithEmptyTrack() async throws {
-        let runner = FakeAppleScriptRunner(output: "stopped||0")
+        let runner = FakeAppleScriptRunner { script in
+            if script.contains("player state") { return "stopped" }
+            if script.contains("player position") { return "0" }
+            return ""  // id of current track → 空
+        }
         let controller = AppleScriptSpotifyController(runner: runner)
         let state = try await controller.playerState()
         #expect(state == PlayerState(state: .stopped, trackUri: nil, positionSeconds: 0))

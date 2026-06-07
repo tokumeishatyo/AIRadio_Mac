@@ -11,10 +11,18 @@ public protocol AppleScriptRunner: Sendable {
 public struct OsascriptRunner: AppleScriptRunner {
     public init() {}
 
+    /// 複数行スクリプトは行ごとに `-e` を分けて渡す（1 つの `-e` に改行を詰めると
+    /// osascript が文の区切りを解釈できず構文エラーになるため）。
+    static func arguments(for source: String) -> [String] {
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+        guard !lines.isEmpty else { return ["-e", source] }
+        return lines.flatMap { ["-e", String($0)] }
+    }
+
     public func run(_ source: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
+        process.arguments = Self.arguments(for: source)
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe

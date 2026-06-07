@@ -53,9 +53,13 @@ func runSpotifyDemo() async {
         try await controller.setVolume(80)
         print("再生開始（10 秒）…")
         try await SystemClock().sleep(seconds: 10)
-        let state = try await controller.playerState()
-        print("状態: \(state)")
-        try await controller.pause()
+        do {
+            let state = try await controller.playerState()
+            print("状態: \(state)")
+        } catch {
+            print("状態取得スキップ: \(error)")
+        }
+        try await controller.pause()  // 状態取得が失敗しても必ず停止する
         print("停止")
     } catch let error as RadioError {
         print("エラー[\(error.code)]: \(error.message)")

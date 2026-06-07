@@ -28,6 +28,8 @@ public protocol SpotifyController: Sendable {
     func setVolume(_ percent: Int) async throws
     func seek(toSeconds seconds: Int) async throws
     func playerState() async throws -> PlayerState
+    /// 現在の曲の長さ（秒）。取得できない場合は 0。
+    func currentTrackDurationSeconds() async throws -> Double
 }
 
 /// 外部リサーチ素材の取得（News RSS / 気象庁 等）。

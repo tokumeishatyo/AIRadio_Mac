@@ -11,6 +11,7 @@ public enum SpotifyError: RadioError, Equatable {
     case noDevice
     case apiFailed(String)
     case authFailed(String)
+    case authRequired
     case searchFailed(String)
 
     public var code: String {
@@ -18,6 +19,7 @@ public enum SpotifyError: RadioError, Equatable {
         case .noDevice: return "E-SPT-NO-DEVICE-001"
         case .apiFailed: return "E-SPT-API-FAILED-001"
         case .authFailed: return "E-SPT-AUTH-FAILED-001"
+        case .authRequired: return "E-SPT-AUTH-REQUIRED-001"
         case .searchFailed: return "E-SPT-SEARCH-FAILED-001"
         }
     }
@@ -29,7 +31,9 @@ public enum SpotifyError: RadioError, Equatable {
         case .apiFailed(let detail):
             return "Spotify 操作に失敗しました: \(detail)"
         case .authFailed(let detail):
-            return "Spotify 認証に失敗しました（client_id / client_secret を確認してください）: \(detail)"
+            return "Spotify 認証に失敗しました（client_id / redirect_uri を確認してください）: \(detail)"
+        case .authRequired:
+            return "Spotify にログインしてください（AIRADIO_DEMO=spotify-auth で認証）"
         case .searchFailed(let detail):
             return "Spotify 検索に失敗しました: \(detail)"
         }

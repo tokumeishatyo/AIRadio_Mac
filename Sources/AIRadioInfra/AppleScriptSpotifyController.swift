@@ -27,6 +27,13 @@ public struct AppleScriptSpotifyController: SpotifyController {
         _ = try await runner.run(#"tell application "Spotify" to set player position to \#(seconds)"#)
     }
 
+    public func currentTrackDurationSeconds() async throws -> Double {
+        // Spotify の AppleScript は duration をミリ秒で返す。
+        let raw = try await runner.run(#"tell application "Spotify" to return duration of current track"#)
+        let ms = Double(raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")) ?? 0
+        return ms / 1000.0
+    }
+
     public func playerState() async throws -> PlayerState {
         // 複数行スクリプトは osascript の解釈で構文エラーになりやすいため、
         // 単一行コマンドを 3 回に分けて取得する（再生・音量と同じ実績のある形）。

@@ -2,16 +2,24 @@ import Foundation
 import Yams
 import AIRadioCore
 
-/// Spotify 認証設定（Web API 検索用）。
+/// Spotify 設定（PKCE 認証 + Web API）。client_secret は不要（公開クライアント）。
 public struct SpotifyConfig: Sendable, Equatable {
     public var clientId: String
-    public var clientSecret: String
+    public var redirectUri: String
     public var market: String
 
-    public init(clientId: String, clientSecret: String, market: String = "JP") {
+    public init(clientId: String, redirectUri: String = "http://127.0.0.1:5543/callback", market: String = "JP") {
         self.clientId = clientId
-        self.clientSecret = clientSecret
+        self.redirectUri = redirectUri
         self.market = market
+    }
+
+    /// リダイレクト URI から待受ポートを導出する。
+    public var loopbackPort: UInt16 {
+        if let port = URLComponents(string: redirectUri)?.port, port > 0, port <= 65535 {
+            return UInt16(port)
+        }
+        return 5543
     }
 }
 
@@ -20,7 +28,7 @@ public enum SpotifyConfigLoader {
     private struct File: Decodable {
         struct Spotify: Decodable {
             let client_id: String?
-            let client_secret: String?
+            let redirect_uri: String?
             let market: String?
         }
         let spotify: Spotify?
@@ -34,12 +42,9 @@ public enum SpotifyConfigLoader {
         else {
             throw ConfigError.missingField("spotify.client_id")
         }
-        guard let clientSecret = spotify.client_secret, !clientSecret.isEmpty else {
-            throw ConfigError.missingField("spotify.client_secret")
-        }
         return SpotifyConfig(
             clientId: clientId,
-            clientSecret: clientSecret,
+            redirectUri: spotify.redirect_uri ?? "http://127.0.0.1:5543/callback",
             market: spotify.market ?? "JP"
         )
     }

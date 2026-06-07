@@ -1,9 +1,10 @@
 import Foundation
 
-/// HTTP 通信の抽象（VOICEVOX / Gemini / Spotify / News / 天気 が共通利用）。
+/// HTTP 通信の抽象（VOICEVOX / Spotify / News / 天気 が共通利用）。
 public protocol HTTPClient: Sendable {
-    func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data
     func get(url: URL, headers: [String: String]) async throws -> Data
+    func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data
+    func put(url: URL, body: Data?, headers: [String: String]) async throws -> Data
 }
 
 /// HTTP のステータス異常。
@@ -19,12 +20,16 @@ public struct URLSessionHTTPClient: HTTPClient {
         self.session = session
     }
 
+    public func get(url: URL, headers: [String: String]) async throws -> Data {
+        try await send(url: url, method: "GET", body: nil, headers: headers)
+    }
+
     public func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
         try await send(url: url, method: "POST", body: body, headers: headers)
     }
 
-    public func get(url: URL, headers: [String: String]) async throws -> Data {
-        try await send(url: url, method: "GET", body: nil, headers: headers)
+    public func put(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
+        try await send(url: url, method: "PUT", body: body, headers: headers)
     }
 
     private func send(url: URL, method: String, body: Data?, headers: [String: String]) async throws -> Data {

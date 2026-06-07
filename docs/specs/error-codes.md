@@ -15,3 +15,4 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-RTM-AUDIO-PLAYBACK-001` | RTM | 音声再生の開始に失敗 | S1 |
 | `E-SPT-AUTH-FAILED-001` | SPT | Client Credentials トークン取得失敗 | S2 |
 | `E-SPT-SEARCH-FAILED-001` | SPT | 検索 / トラック取得失敗 | S2 |
+| `E-SPT-AUTH-REQUIRED-001` | SPT | 未ログイン（refresh トークンなし）。PKCE 認可が必要 | S4 |

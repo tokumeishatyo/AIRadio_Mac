@@ -76,11 +76,21 @@ public final class FakeSpotifyController: SpotifyController, @unchecked Sendable
     private let lock = NSLock()
     private var _events: [SpotifyEvent] = []
     private var _state: PlayerState
-    public init(state: PlayerState = PlayerState(state: .stopped)) { _state = state }
+    private let _duration: Double
+    public init(state: PlayerState = PlayerState(state: .stopped), durationSeconds: Double = 0) {
+        _state = state
+        _duration = durationSeconds
+    }
     public var events: [SpotifyEvent] { lock.withLock { _events } }
-    public func play(uri: String) async throws { lock.withLock { _events.append(.play(uri)) } }
+    public func play(uri: String) async throws {
+        lock.withLock {
+            _events.append(.play(uri))
+            _state = PlayerState(state: .playing, trackUri: uri, positionSeconds: 0)
+        }
+    }
     public func pause() async throws { lock.withLock { _events.append(.pause) } }
     public func setVolume(_ percent: Int) async throws { lock.withLock { _events.append(.setVolume(percent)) } }
     public func seek(toSeconds seconds: Int) async throws { lock.withLock { _events.append(.seek(seconds)) } }
     public func playerState() async throws -> PlayerState { lock.withLock { _state } }
+    public func currentTrackDurationSeconds() async throws -> Double { _duration }
 }

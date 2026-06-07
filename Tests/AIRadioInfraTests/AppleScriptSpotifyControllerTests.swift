@@ -59,6 +59,14 @@ struct AppleScriptSpotifyControllerTests {
         #expect(state == PlayerState(state: .playing, trackUri: "spotify:track:abc", positionSeconds: 12.5))
     }
 
+    @Test func currentTrackDurationConvertsMillisToSeconds() async throws {
+        let runner = FakeAppleScriptRunner(output: "210000")  // 210000 ms
+        let controller = AppleScriptSpotifyController(runner: runner)
+        let duration = try await controller.currentTrackDurationSeconds()
+        #expect(duration == 210.0)
+        #expect(runner.scripts[0].contains("duration of current track"))
+    }
+
     @Test func playerStateParsesStoppedWithEmptyTrack() async throws {
         let runner = FakeAppleScriptRunner { script in
             if script.contains("player state") { return "stopped" }

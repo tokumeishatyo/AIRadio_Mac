@@ -20,13 +20,20 @@ final class FakeHTTPClient: HTTPClient, @unchecked Sendable {
         self.responder = responder
     }
 
-    func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
-        lock.withLock { _requests.append(.init(url: url, method: "POST", body: body, headers: headers)) }
-        return try responder(url)
+    func get(url: URL, headers: [String: String]) async throws -> Data {
+        try record(url: url, method: "GET", body: nil, headers: headers)
     }
 
-    func get(url: URL, headers: [String: String]) async throws -> Data {
-        lock.withLock { _requests.append(.init(url: url, method: "GET", body: nil, headers: headers)) }
+    func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
+        try record(url: url, method: "POST", body: body, headers: headers)
+    }
+
+    func put(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
+        try record(url: url, method: "PUT", body: body, headers: headers)
+    }
+
+    private func record(url: URL, method: String, body: Data?, headers: [String: String]) throws -> Data {
+        lock.withLock { _requests.append(.init(url: url, method: method, body: body, headers: headers)) }
         return try responder(url)
     }
 }

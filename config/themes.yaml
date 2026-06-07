@@ -1,0 +1,32 @@
+# 統一テーマ/BGM 演出の設定（S3）
+# track_uri は BGM に使う Spotify トラック（共有 URL / spotify:track: / 裸 ID いずれも可、自動正規化）。
+# デフォルトは動作確認用に再生実績のある同じ曲。好きな曲の URI に差し替え可。
+# 演出: (tagline) → BGM フル音量 intro_seconds → ducked_volume へ → 発話 →
+#       曲の「残り outro_seconds 秒」へシーク → フル音量に戻す → 曲の終わりで停止
+#       （シーク位置 = 曲の長さ - outro_seconds。曲の自然な終わりで終わる）
+opening:
+  tagline: "ずんだもんの ケイラボAIラジオ"
+  track_uri: "https://open.spotify.com/intl-ja/track/5jsqaNOAbeBG5QYL7JpySJ?si=5c452cc8429d4c49"
+  intro_seconds: 5
+  volume: 85
+  ducked_volume: 35
+  outro_seconds: 10
+  announcement: "こんばんは。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。"
+
+news:
+  tagline: "ニュースと天気予報です"
+  track_uri: "spotify:track:7ovUcF5uHTBRzUpB6ZOmvt"
+  intro_seconds: 5
+  volume: 85
+  ducked_volume: 35
+  outro_seconds: 10
+  announcement: "本日のニュースをお伝えするのだ。これはダミーのニュース原稿なのだ。詳しい中身は後のスライスで本物のニュースに差し替える予定なのだ。続いて天気予報なのだ。今日は全国的におおむね晴れ、ところにより気まぐれな雨が降るかもしれないのだ。以上、ダミーのニュースと天気予報でした。"
+
+# ED は tagline なし（いきなり BGM）。
+ending:
+  track_uri: "spotify:track:5gf9qeUJUHvhp1TkHUJ2sR"
+  intro_seconds: 5
+  volume: 85
+  ducked_volume: 35
+  outro_seconds: 10
+  announcement: "本日も最後までお聴きいただき、ありがとうございましたなのだ。また次回お会いしましょう。それでは、おやすみなさいなのだ。"

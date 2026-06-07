@@ -1,0 +1,86 @@
+import Foundation
+import AIRadioCore
+
+// MARK: - ステートレス fake（struct, Sendable）
+
+/// プロンプトをそのままエコーする LLM。
+public struct EchoLLM: LLMBackend {
+    public init() {}
+    public func generate(_ request: LLMRequest) async throws -> String {
+        "echo: " + request.prompt
+    }
+}
+
+/// テキストと話者 ID から決定論的なダミー WAV データを返す TTS。
+public struct InMemoryTTS: TTSBackend {
+    public init() {}
+    public func synthesize(text: String, speakerId: Int) async throws -> Data {
+        Data("\(speakerId):\(text)".utf8)
+    }
+}
+
+/// 固定時刻・即時 sleep の Clock。
+public struct FakeClock: Clock {
+    public let now: Date
+    public init(now: Date = Date(timeIntervalSince1970: 0)) { self.now = now }
+    public func sleep(seconds: Double) async throws { /* 即時（待たない） */ }
+}
+
+/// 固定ペイロードを返す ResearchSource。
+public struct FakeResearchSource: ResearchSource {
+    public let payload: String
+    public init(payload: String) { self.payload = payload }
+    public func fetch() async throws -> String { payload }
+}
+
+// MARK: - 記録 fake（呼び出しを記録、final class + ロックで Sendable 保証）
+
+/// 再生された WAV を記録する AudioPlayer。
+public final class SpyAudioPlayer: AudioPlayer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _played: [Data] = []
+    public init() {}
+    public var played: [Data] { lock.withLock { _played } }
+    public func play(_ wav: Data) async throws {
+        lock.withLock { _played.append(wav) }
+    }
+}
+
+/// 検索クエリを記録し、設定済み結果を返す TrackSearcher。
+public final class FakeTrackSearcher: TrackSearcher, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _results: [TrackInfo]
+    private var _queries: [String] = []
+    public init(results: [TrackInfo] = []) { _results = results }
+    public var queries: [String] { lock.withLock { _queries } }
+    public func search(query: String, limit: Int) async throws -> [TrackInfo] {
+        lock.withLock {
+            _queries.append(query)
+            return Array(_results.prefix(limit))
+        }
+    }
+    public func isPlayable(_ uri: String) async throws -> Bool {
+        lock.withLock { _results.first { $0.uri == uri }?.isPlayable ?? false }
+    }
+}
+
+/// Spotify 制御の呼び出し順を記録する SpotifyController。
+public enum SpotifyEvent: Sendable, Equatable {
+    case play(String)
+    case pause
+    case setVolume(Int)
+    case seek(Int)
+}
+
+public final class FakeSpotifyController: SpotifyController, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [SpotifyEvent] = []
+    private var _state: PlayerState
+    public init(state: PlayerState = PlayerState(state: .stopped)) { _state = state }
+    public var events: [SpotifyEvent] { lock.withLock { _events } }
+    public func play(uri: String) async throws { lock.withLock { _events.append(.play(uri)) } }
+    public func pause() async throws { lock.withLock { _events.append(.pause) } }
+    public func setVolume(_ percent: Int) async throws { lock.withLock { _events.append(.setVolume(percent)) } }
+    public func seek(toSeconds seconds: Int) async throws { lock.withLock { _events.append(.seek(seconds)) } }
+    public func playerState() async throws -> PlayerState { lock.withLock { _state } }
+}

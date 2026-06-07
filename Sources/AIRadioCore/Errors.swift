@@ -80,6 +80,28 @@ public enum TtsError: RadioError, Equatable {
     }
 }
 
+/// リサーチ（ニュース / 天気）に関するエラー。
+public enum ResearchError: RadioError, Equatable {
+    case newsFetchFailed(String)
+    case weatherFetchFailed(String)
+
+    public var code: String {
+        switch self {
+        case .newsFetchFailed: return "E-NEWS-FETCH-FAILED-001"
+        case .weatherFetchFailed: return "E-WX-FETCH-FAILED-001"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .newsFetchFailed(let detail):
+            return "ニュースの取得に失敗しました: \(detail)"
+        case .weatherFetchFailed(let detail):
+            return "天気予報の取得に失敗しました: \(detail)"
+        }
+    }
+}
+
 /// 音声再生に関するエラー。
 public enum AudioError: RadioError, Equatable {
     case playbackFailed

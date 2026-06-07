@@ -16,3 +16,5 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-SPT-AUTH-FAILED-001` | SPT | Client Credentials トークン取得失敗 | S2 |
 | `E-SPT-SEARCH-FAILED-001` | SPT | 検索 / トラック取得失敗 | S2 |
 | `E-SPT-AUTH-REQUIRED-001` | SPT | 未ログイン（refresh トークンなし）。PKCE 認可が必要 | S4 |
+| `E-NEWS-FETCH-FAILED-001` | NEWS | Google News RSS 取得・解析失敗 | S5 |
+| `E-WX-FETCH-FAILED-001` | WX | 気象庁 取得・解析失敗 | S5 |

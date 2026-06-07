@@ -88,6 +88,7 @@ func runThemeDemo() async {
     print("ケイラボAIラジオ Mac版 — 統一テーマエンジン デモ（OP / ニュース / ED）")
     do {
         let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
+        let research = try ResearchConfigLoader.load(path: "config/research.yaml")
         let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
@@ -98,17 +99,48 @@ func runThemeDemo() async {
             clock: SystemClock()
         )
         let speakerId = 3  // ずんだもん
-        let segments: [(String, LoadedTheme)] = [
-            ("オープニング", themes.opening),
-            ("ニュースと天気", themes.news),
-            ("エンディング", themes.ending),
+
+        // ニュースセグメントは実データ（Google News RSS + 気象庁）で原稿を生成（fail-tolerant）。
+        let newsWeather = NewsWeatherProvider(
+            news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
+            weather: JmaWeatherSource(areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http),
+            template: research.announcementTemplate
+        )
+        print("ニュース・天気を取得中…")
+        let newsAnnouncement = await newsWeather.announcement()
+        print("ニュース原稿: \(newsAnnouncement.prefix(80))…")
+
+        let segments: [(String, ThemeConfig, String)] = [
+            ("オープニング", themes.opening.theme, themes.opening.announcement),
+            ("ニュースと天気", themes.news.theme, newsAnnouncement),
+            ("エンディング", themes.ending.theme, themes.ending.announcement),
         ]
-        for (name, segment) in segments {
+        for (name, theme, announcement) in segments {
             print("=== \(name) ===")
-            try await sequencer.run(theme: segment.theme, announcement: segment.announcement, speakerId: speakerId)
+            try await sequencer.run(theme: theme, announcement: announcement, speakerId: speakerId)
             print("\(name) 完了")
         }
         print("デモ完了")
+    } catch let error as RadioError {
+        print("エラー[\(error.code)]: \(error.message)")
+    } catch {
+        print("エラー: \(error)")
+    }
+}
+
+func runNewsDemo() async {
+    print("ケイラボAIラジオ Mac版 — ニュース・天気 取得デモ（音声なし）")
+    do {
+        let research = try ResearchConfigLoader.load(path: "config/research.yaml")
+        let http = URLSessionHTTPClient()
+        let newsWeather = NewsWeatherProvider(
+            news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
+            weather: JmaWeatherSource(areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http),
+            template: research.announcementTemplate
+        )
+        let announcement = await newsWeather.announcement()
+        print("--- ニュース原稿 ---")
+        print(announcement)
     } catch let error as RadioError {
         print("エラー[\(error.code)]: \(error.message)")
     } catch {
@@ -120,5 +152,6 @@ switch ProcessInfo.processInfo.environment["AIRADIO_DEMO"] ?? "tts" {
 case "spotify-auth": await runSpotifyAuthDemo()
 case "spotify": await runSpotifyDemo()
 case "theme": await runThemeDemo()
+case "news": await runNewsDemo()
 default: await runTtsDemo()
 }

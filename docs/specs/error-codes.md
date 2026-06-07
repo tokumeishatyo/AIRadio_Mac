@@ -13,3 +13,5 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-TTS-UNREACHABLE-001` | TTS | VOICEVOX に接続できない | S1 |
 | `E-TTS-SYNTHESIS-FAILED-001` | TTS | 合成 API がエラー応答 | S1 |
 | `E-RTM-AUDIO-PLAYBACK-001` | RTM | 音声再生の開始に失敗 | S1 |
+| `E-SPT-AUTH-FAILED-001` | SPT | Client Credentials トークン取得失敗 | S2 |
+| `E-SPT-SEARCH-FAILED-001` | SPT | 検索 / トラック取得失敗 | S2 |

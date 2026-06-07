@@ -10,11 +10,15 @@ public protocol RadioError: Error {
 public enum SpotifyError: RadioError, Equatable {
     case noDevice
     case apiFailed(String)
+    case authFailed(String)
+    case searchFailed(String)
 
     public var code: String {
         switch self {
         case .noDevice: return "E-SPT-NO-DEVICE-001"
         case .apiFailed: return "E-SPT-API-FAILED-001"
+        case .authFailed: return "E-SPT-AUTH-FAILED-001"
+        case .searchFailed: return "E-SPT-SEARCH-FAILED-001"
         }
     }
 
@@ -24,6 +28,10 @@ public enum SpotifyError: RadioError, Equatable {
             return "再生可能な Spotify が見つかりません（Spotify アプリを起動してください）"
         case .apiFailed(let detail):
             return "Spotify 操作に失敗しました: \(detail)"
+        case .authFailed(let detail):
+            return "Spotify 認証に失敗しました（client_id / client_secret を確認してください）: \(detail)"
+        case .searchFailed(let detail):
+            return "Spotify 検索に失敗しました: \(detail)"
         }
     }
 }

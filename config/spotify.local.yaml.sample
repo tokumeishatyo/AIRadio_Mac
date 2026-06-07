@@ -1,0 +1,11 @@
+# Spotify 認証情報（Web API 検索用、Client Credentials フロー）
+# このファイルをコピーして config/spotify.local.yaml を作成してください（.gitignore 対象）。
+#   cp config/spotify.local.yaml.sample config/spotify.local.yaml
+#
+# client_id / client_secret は Spotify Developer Dashboard のアプリ設定から取得。
+#   https://developer.spotify.com/dashboard → アプリ → Settings → View client secret
+# ※ 再生制御は AppleScript（認証不要）。本ファイルは「曲検索」専用です。
+spotify:
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET"
+  market: "JP"

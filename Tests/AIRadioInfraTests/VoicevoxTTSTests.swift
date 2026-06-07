@@ -3,32 +3,6 @@ import Foundation
 import AIRadioCore
 @testable import AIRadioInfra
 
-/// テスト用の HTTP fake（リクエストを記録し、URL に応じた応答を返す/投げる）。
-private final class FakeHTTPClient: HTTPClient, @unchecked Sendable {
-    struct Request: Sendable {
-        let url: URL
-        let body: Data?
-        let headers: [String: String]
-    }
-    private let lock = NSLock()
-    private var _requests: [Request] = []
-    var requests: [Request] { lock.withLock { _requests } }
-
-    private let responder: @Sendable (URL) throws -> Data
-    init(responder: @escaping @Sendable (URL) throws -> Data) {
-        self.responder = responder
-    }
-
-    func post(url: URL, body: Data?, headers: [String: String]) async throws -> Data {
-        lock.withLock { _requests.append(.init(url: url, body: body, headers: headers)) }
-        return try responder(url)
-    }
-    func get(url: URL, headers: [String: String]) async throws -> Data {
-        lock.withLock { _requests.append(.init(url: url, body: nil, headers: headers)) }
-        return try responder(url)
-    }
-}
-
 struct VoicevoxTTSTests {
     @Test func callsAudioQueryThenSynthesisAndReturnsWav() async throws {
         let queryJSON = Data("{\"accent_phrases\":[]}".utf8)

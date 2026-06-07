@@ -45,3 +45,43 @@ public enum ConfigError: RadioError, Equatable {
         }
     }
 }
+
+/// TTS（VOICEVOX 等）に関するエラー。
+public enum TtsError: RadioError, Equatable {
+    case unreachable
+    case synthesisFailed(String)
+
+    public var code: String {
+        switch self {
+        case .unreachable: return "E-TTS-UNREACHABLE-001"
+        case .synthesisFailed: return "E-TTS-SYNTHESIS-FAILED-001"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .unreachable:
+            return "VOICEVOX に接続できません（VOICEVOX を起動してください）"
+        case .synthesisFailed(let detail):
+            return "音声合成に失敗しました: \(detail)"
+        }
+    }
+}
+
+/// 音声再生に関するエラー。
+public enum AudioError: RadioError, Equatable {
+    case playbackFailed
+
+    public var code: String {
+        switch self {
+        case .playbackFailed: return "E-RTM-AUDIO-PLAYBACK-001"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .playbackFailed:
+            return "音声の再生に失敗しました"
+        }
+    }
+}

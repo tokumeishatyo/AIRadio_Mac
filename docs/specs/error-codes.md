@@ -10,3 +10,6 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-SPT-NO-DEVICE-001` | SPT | 再生可能な Spotify がない | S0 |
 | `E-SPT-API-FAILED-001` | SPT | Spotify 操作の一般失敗 | S0 |
 | `E-CFG-MISSING-FIELD-001` | CFG | 設定の必須フィールド欠落 | S0 |
+| `E-TTS-UNREACHABLE-001` | TTS | VOICEVOX に接続できない | S1 |
+| `E-TTS-SYNTHESIS-FAILED-001` | TTS | 合成 API がエラー応答 | S1 |
+| `E-RTM-AUDIO-PLAYBACK-001` | RTM | 音声再生の開始に失敗 | S1 |

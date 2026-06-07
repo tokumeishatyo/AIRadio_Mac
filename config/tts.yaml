@@ -1,0 +1,6 @@
+# VOICEVOX 接続設定
+# endpoint: ローカル HTTP サーバ（127.0.0.1 を使い IPv6 ::1 解決遅延を回避）
+# credit:   ライセンス遵守のクレジット表記。{speaker} は DJ 表示名に置換される（後続スライス）
+voicevox:
+  endpoint: "http://127.0.0.1:50021/"
+  credit: "VOICEVOX:{speaker}"

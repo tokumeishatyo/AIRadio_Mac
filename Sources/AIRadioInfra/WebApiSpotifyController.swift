@@ -6,19 +6,40 @@ import AIRadioCore
 public struct WebApiSpotifyController: SpotifyController {
     private let auth: any SpotifyTokenProvider
     private let http: any HTTPClient
+    private let retryDelaySeconds: Double
 
-    public init(auth: any SpotifyTokenProvider, http: any HTTPClient) {
+    public init(auth: any SpotifyTokenProvider, http: any HTTPClient, retryDelaySeconds: Double = 1.0) {
         self.auth = auth
         self.http = http
+        self.retryDelaySeconds = retryDelaySeconds
     }
 
     public func play(uri: String) async throws {
         let token = try await auth.validAccessToken()
-        let deviceId = try await activeDeviceId(token: token)
-        var components = URLComponents(string: "https://api.spotify.com/v1/me/player/play")!
-        components.queryItems = [URLQueryItem(name: "device_id", value: deviceId)]
         let body = try JSONSerialization.data(withJSONObject: ["uris": [uri]])
-        try await send(method: .put, url: components.url!, body: body, token: token, json: true)
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            let deviceId = try await activeDeviceId(token: token)
+            var components = URLComponents(string: "https://api.spotify.com/v1/me/player/play")!
+            components.queryItems = [URLQueryItem(name: "device_id", value: deviceId)]
+            do {
+                _ = try await http.put(url: components.url!, body: body, headers: [
+                    "Authorization": "Bearer \(token)",
+                    "Content-Type": "application/json",
+                ])
+                return
+            } catch HTTPClientError.status(404) where attempt < maxAttempts {
+                // デバイスを長時間操作していないと登録が stale になり、device_id 指定でも 404 が返る。
+                // transfer playback でデバイスを起こしてから再試行する。
+                try? await transferPlayback(to: deviceId, token: token)
+                try await Task.sleep(nanoseconds: UInt64(retryDelaySeconds * 1_000_000_000))
+            } catch let error as SpotifyError {
+                throw error
+            } catch {
+                throw SpotifyError.apiFailed(String(describing: error))
+            }
+        }
+        throw SpotifyError.noDevice
     }
 
     public func pause() async throws {
@@ -91,6 +112,19 @@ public struct WebApiSpotifyController: SpotifyController {
         } catch {
             throw SpotifyError.apiFailed(String(describing: error))
         }
+    }
+
+    /// 再生先デバイスへの transfer playback（スリープ状態のデバイスを起こす。play: false = 即再生しない）。
+    private func transferPlayback(to deviceId: String, token: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["device_ids": [deviceId], "play": false])
+        _ = try await http.put(
+            url: URL(string: "https://api.spotify.com/v1/me/player")!,
+            body: body,
+            headers: [
+                "Authorization": "Bearer \(token)",
+                "Content-Type": "application/json",
+            ]
+        )
     }
 
     private func activeDeviceId(token: String) async throws -> String {

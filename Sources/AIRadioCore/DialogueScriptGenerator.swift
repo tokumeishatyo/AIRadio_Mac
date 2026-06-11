@@ -49,7 +49,7 @@ public struct DialogueScriptGenerator: Sendable {
         \(corner.theme)
 
         # 制約
-        - 合計でおよそ \(corner.targetCharacters) 文字（\(corner.targetMinutes) 分程度の会話）。
+        - セリフの合計は \(corner.targetCharacters) 文字以上、\(corner.targetCharacters * 12 / 10) 文字以内（\(corner.targetMinutes) 分程度の会話）。短すぎる台本は不可。
         - 出力は台本のみ。1 行につき 1 つのセリフを「DJ名: セリフ」の形式で書く。
         - DJ名は「\(names)」のみ。ナレーション、ト書き、見出し、記号装飾は書かない。
         - 二人が交互に、それぞれの口調を守って自然に会話する。

@@ -83,4 +83,54 @@ struct WebApiSpotifyControllerTests {
         let duration = try await controller.currentTrackDurationSeconds()
         #expect(duration == 210.0)
     }
+
+    /// 呼び出し回数を数えるスレッドセーフなカウンタ（stale デバイス 404 の再現用）。
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func next() -> Int { lock.withLock { value += 1; return value } }
+    }
+
+    @Test func playRetriesAfterStaleDevice404ViaTransfer() async throws {
+        // アイドルで stale なデバイスは device_id 指定でも 404 を返す。
+        // transfer playback で起こして再試行し、2 回目で成功する。
+        let playAttempts = Counter()
+        let fake = FakeHTTPClient { url in
+            if url.absoluteString.contains("/devices") { return Self.devicesJSON }
+            if url.absoluteString.contains("/v1/me/player/play") {
+                if playAttempts.next() == 1 { throw HTTPClientError.status(404) }
+                return Data()
+            }
+            return Data()  // transfer playback（PUT /v1/me/player）
+        }
+        let controller = WebApiSpotifyController(
+            auth: FakeTokenProvider(token: "TOK"), http: fake, retryDelaySeconds: 0
+        )
+        try await controller.play(uri: "spotify:track:abc")
+
+        let transfer = fake.requests.first {
+            $0.url.absoluteString.hasSuffix("/v1/me/player") && $0.method == "PUT"
+        }
+        let body = String(data: transfer?.body ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("DEV"))
+        #expect(body.contains("\"play\":false"))
+        let plays = fake.requests.filter { $0.url.absoluteString.contains("/v1/me/player/play") }
+        #expect(plays.count == 2)
+    }
+
+    @Test func playGivesUpAfterPersistent404() async {
+        let fake = FakeHTTPClient { url in
+            if url.absoluteString.contains("/devices") { return Self.devicesJSON }
+            if url.absoluteString.contains("/v1/me/player/play") { throw HTTPClientError.status(404) }
+            return Data()
+        }
+        let controller = WebApiSpotifyController(
+            auth: FakeTokenProvider(token: "TOK"), http: fake, retryDelaySeconds: 0
+        )
+        await #expect(throws: SpotifyError.apiFailed("status(404)")) {
+            try await controller.play(uri: "spotify:track:abc")
+        }
+        let plays = fake.requests.filter { $0.url.absoluteString.contains("/v1/me/player/play") }
+        #expect(plays.count == 3)
+    }
 }

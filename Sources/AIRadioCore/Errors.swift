@@ -102,6 +102,38 @@ public enum ResearchError: RadioError, Equatable {
     }
 }
 
+/// LLM（Gemini / Gemma）に関するエラー。
+/// キー欠落は fail-fast、それ以外は fail-tolerant（コーナー中断 + 静寂、放送自体は継続）。
+public enum LLMError: RadioError, Equatable {
+    case keyMissing
+    case apiFailed(String)
+    case emptyResponse
+    case scriptParseFailed(String)
+
+    public var code: String {
+        switch self {
+        case .keyMissing: return "E-LLM-KEY-MISSING-001"
+        case .apiFailed: return "E-LLM-API-FAILED-001"
+        case .emptyResponse: return "E-LLM-EMPTY-RESPONSE-001"
+        case .scriptParseFailed: return "E-LLM-SCRIPT-PARSE-FAILED-001"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .keyMissing:
+            return "Gemini API キーが見つかりません（config/llm.local.yaml.sample をコピーして"
+                + " config/llm.local.yaml に api_key を設定してください）"
+        case .apiFailed(let detail):
+            return "LLM リクエストに失敗しました: \(detail)"
+        case .emptyResponse:
+            return "LLM の応答にテキストが含まれていません"
+        case .scriptParseFailed(let detail):
+            return "LLM 応答を台本として解釈できませんでした: \(detail)"
+        }
+    }
+}
+
 /// 音声再生に関するエラー。
 public enum AudioError: RadioError, Equatable {
     case playbackFailed

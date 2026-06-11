@@ -7,6 +7,7 @@ import AIRadioInfra
 //   AIRADIO_DEMO=spotify-auth  Spotify ログイン（PKCE、ブラウザ、初回のみ）
 //   AIRADIO_DEMO=spotify       Spotify 検索 + Web API 再生
 //   AIRADIO_DEMO=theme         統一テーマエンジン（OP / ニュース / ED）
+//   AIRADIO_DEMO=corner        会話コーナー（LLM 台本 → DJ 二人の会話 → 一曲）
 
 private let spotifyScopes = ["user-read-playback-state", "user-modify-playback-state"]
 
@@ -148,10 +149,57 @@ func runNewsDemo() async {
     }
 }
 
+func runCornerDemo() async {
+    print("ケイラボAIラジオ Mac版 — 会話コーナー デモ（LLM 台本 → DJ 二人 → 一曲）")
+    do {
+        let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
+        let djs = try DjsConfigLoader.load(path: "config/djs.yaml")
+        let corners = try CornersConfigLoader.load(path: "config/corners.yaml")
+        guard let corner = corners.first else {
+            throw ConfigError.missingField("corners")
+        }
+        let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
+        let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+        let http = URLSessionHTTPClient()
+        let auth = try makeSpotifyAuth()
+        let engine = CornerEngine(
+            llm: GeminiLLMBackend(config: llmConfig, http: http),
+            tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
+            audio: AVAudioPlayerBackend(),
+            searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
+            spotify: WebApiSpotifyController(auth: auth, http: http),
+            clock: SystemClock(),
+            temperature: llmConfig.temperature,
+            onEvent: { event in
+                switch event {
+                case .songPicked(let track):
+                    let label = track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)"
+                    print("締めの曲（プレフライト済み）: \(label)")
+                case .scriptReady(let lineCount, let totalCharacters):
+                    print("台本生成完了: \(lineCount) 行 / \(totalCharacters) 文字")
+                case .line(let line):
+                    print("  \(line.djId): \(line.text)")
+                case .songStarted(let track):
+                    let label = track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)"
+                    print("♪ 再生中: \(label)")
+                }
+            }
+        )
+        print("コーナー「\(corner.title)」テーマ: \(corner.theme)")
+        try await engine.run(corner: corner, djs: djs)
+        print("コーナー完了")
+    } catch let error as RadioError {
+        print("エラー[\(error.code)]: \(error.message)")
+    } catch {
+        print("エラー: \(error)")
+    }
+}
+
 switch ProcessInfo.processInfo.environment["AIRADIO_DEMO"] ?? "tts" {
 case "spotify-auth": await runSpotifyAuthDemo()
 case "spotify": await runSpotifyDemo()
 case "theme": await runThemeDemo()
 case "news": await runNewsDemo()
+case "corner": await runCornerDemo()
 default: await runTtsDemo()
 }

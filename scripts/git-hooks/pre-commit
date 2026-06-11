@@ -1,0 +1,24 @@
+#!/bin/sh
+# API キー誤コミット防止フック（docs/specs/s6-gemini-dialogue-corner.md §7）。
+# 有効化: git config core.hooksPath scripts/git-hooks
+set -eu
+
+# 1) 機密設定ファイル（*.local.yaml）がステージされていたら拒否。
+#    .gitignore 済みだが、`git add -f` による突破をここで捕捉する。
+blocked="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.local\.yaml$' || true)"
+if [ -n "$blocked" ]; then
+    echo "コミット拒否: 機密設定ファイル（*.local.yaml）がステージされています:" >&2
+    echo "$blocked" | sed 's/^/  /' >&2
+    echo "解除: git restore --staged <file>" >&2
+    exit 1
+fi
+
+# 2) ステージされる追加行に Google API キーのパターンがあれば拒否。
+#    ソースコードやドキュメントへのコピペ混入を捕捉する。
+if git diff --cached --unified=0 | grep '^+' | grep -qE 'AIza[0-9A-Za-z_-]{35}'; then
+    echo "コミット拒否: ステージ内容に Google API キーらしき文字列（AIza...）が含まれています。" >&2
+    echo "該当箇所を削除してからコミットしてください。" >&2
+    exit 1
+fi
+
+exit 0

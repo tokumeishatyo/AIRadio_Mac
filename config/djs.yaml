@@ -1,0 +1,11 @@
+# 番組 DJ の一覧。speaker_id は VOICEVOX の /speakers で実在確認済みの ID（ノーマル）。
+# persona は台本生成プロンプトに渡す口調・キャラクター設定。
+djs:
+  - id: zundamon
+    name: "ずんだもん"
+    speaker_id: 3
+    persona: "一人称はボク。語尾は「〜なのだ」「〜のだ」。好奇心旺盛で明るく、話を広げるボケ役。"
+  - id: metan
+    name: "四国めたん"
+    speaker_id: 2
+    persona: "一人称はわたくし。上品で落ち着いた口調。知識が豊富で、軽妙に切り返すツッコミ役。"

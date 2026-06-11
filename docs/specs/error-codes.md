@@ -18,3 +18,7 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-SPT-AUTH-REQUIRED-001` | SPT | 未ログイン（refresh トークンなし）。PKCE 認可が必要 | S4 |
 | `E-NEWS-FETCH-FAILED-001` | NEWS | Google News RSS 取得・解析失敗 | S5 |
 | `E-WX-FETCH-FAILED-001` | WX | 気象庁 取得・解析失敗 | S5 |
+| `E-LLM-KEY-MISSING-001` | LLM | Gemini API キー未設定（llm.local.yaml なし / api_key 空） | S6 |
+| `E-LLM-API-FAILED-001` | LLM | generateContent が非 2xx / 通信失敗 | S6 |
+| `E-LLM-EMPTY-RESPONSE-001` | LLM | LLM 応答にテキストがない | S6 |
+| `E-LLM-SCRIPT-PARSE-FAILED-001` | LLM | LLM 応答が台本として解釈できない（4 行未満） | S6 |

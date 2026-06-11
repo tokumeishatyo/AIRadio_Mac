@@ -35,6 +35,22 @@ public struct FakeResearchSource: ResearchSource {
 
 // MARK: - 記録 fake（呼び出しを記録、final class + ロックで Sendable 保証）
 
+/// 用意した応答を順番に返し、リクエストを記録する LLM。応答が尽きたら emptyResponse。
+public final class ScriptedLLM: LLMBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _responses: [String]
+    private var _requests: [LLMRequest] = []
+    public init(responses: [String]) { _responses = responses }
+    public var requests: [LLMRequest] { lock.withLock { _requests } }
+    public func generate(_ request: LLMRequest) async throws -> String {
+        try lock.withLock {
+            _requests.append(request)
+            guard !_responses.isEmpty else { throw LLMError.emptyResponse }
+            return _responses.removeFirst()
+        }
+    }
+}
+
 /// 再生された WAV を記録する AudioPlayer。
 public final class SpyAudioPlayer: AudioPlayer, @unchecked Sendable {
     private let lock = NSLock()

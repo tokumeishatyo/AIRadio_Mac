@@ -99,7 +99,7 @@ struct CornerEngineTests {
             try await fixture.engine.run(corner: corner(), djs: djs)
         }
         #expect(fixture.audio.played.isEmpty)
-        #expect(fixture.spotify.events == [.pause])
+        #expect(fixture.spotify.events == [.pause, .setVolume(85)])  // 静寂 + 音量復元
     }
 
     @Test("未定義の DJ id は設定エラー")

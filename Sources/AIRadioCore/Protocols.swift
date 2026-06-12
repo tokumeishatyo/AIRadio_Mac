@@ -40,9 +40,16 @@ public protocol ResearchSource: Sendable {
 extension SpotifyController {
     /// 後始末用 pause。キャンセル済み Task 内では URLSession がリクエストを送らずに取り消すため、
     /// キャンセルを継承しない新しい Task で実行して確実に Spotify へ届ける（完全静寂、CLAUDE.md §3-1）。
-    public func pauseIgnoringCancellation() async {
+    /// `restoringVolume` を渡すと停止後にアプリ音量を戻す（ダッキング中の停止で
+    /// Spotify が小音量のまま残らないように）。
+    public func pauseIgnoringCancellation(restoringVolume: Int? = nil) async {
         let spotify = self
-        await Task { try? await spotify.pause() }.value
+        await Task {
+            try? await spotify.pause()
+            if let volume = restoringVolume {
+                try? await spotify.setVolume(volume)
+            }
+        }.value
     }
 }
 

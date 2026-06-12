@@ -40,7 +40,7 @@ func runTtsDemo() async {
         let tts = VoicevoxTTS(endpoint: config.endpoint, http: URLSessionHTTPClient())
         let wav = try await tts.synthesize(text: "こんにちは。ケイラボAIラジオのテストなのだ。", speakerId: 3)
         print("合成成功: \(wav.count) bytes")
-        try await AVAudioPlayerBackend().play(wav)
+        try await AVAudioPlayerBackend(volume: Float(config.playbackVolume)).play(wav)
         print("再生完了")
     } catch let error as RadioError {
         print("エラー[\(error.code)]: \(error.message)")
@@ -104,7 +104,7 @@ func runThemeDemo() async {
         let auth = try makeSpotifyAuth()
         let sequencer = ThemeSequencer(
             tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
-            audio: AVAudioPlayerBackend(),
+            audio: AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume)),
             spotify: try makeSpotifyController(auth: auth, http: http),
             clock: SystemClock()
         )
@@ -174,7 +174,7 @@ func runCornerDemo() async {
         let engine = CornerEngine(
             llm: GeminiLLMBackend(config: llmConfig, http: http),
             tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
-            audio: AVAudioPlayerBackend(),
+            audio: AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume)),
             searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
             spotify: try makeSpotifyController(auth: auth, http: http),
             clock: SystemClock(),
@@ -219,7 +219,7 @@ func runBroadcastDemo() async {
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
         let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http)
-        let audio = AVAudioPlayerBackend()
+        let audio = AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume))
         let spotify = try makeSpotifyController(auth: auth, http: http)
         let clock = SystemClock()
 

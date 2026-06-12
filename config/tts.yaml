@@ -4,3 +4,6 @@
 voicevox:
   endpoint: "http://127.0.0.1:50021/"
   credit: "VOICEVOX:{speaker}"
+# 合成音声の再生音量（0.0〜1.0）。VOICEVOX はほぼフルスケールで出力されるため、
+# Spotify の音楽より声が大きすぎる場合はここを下げてバランスを取る。
+playback_volume: 0.65

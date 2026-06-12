@@ -96,7 +96,7 @@ public struct BroadcastEngine: Sendable {
                 }
             }
         } catch {
-            await spotify.pauseIgnoringCancellation()
+            await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.theme.volume)
             throw error
         }
         // 各セグメントも自前で pause するが、エンジンでも重ねて完全静寂を保証する。

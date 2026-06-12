@@ -4,10 +4,17 @@ import AIRadioCore
 
 /// `AVAudioPlayer` による WAV 再生。再生完了まで待機し、キャンセル時は停止する。
 public final class AVAudioPlayerBackend: AudioPlayer, @unchecked Sendable {
-    public init() {}
+    /// 再生音量（0.0–1.0）。VOICEVOX はほぼフルスケールで出力されるため、
+    /// Spotify の音楽とのバランス調整に使う（`config/tts.yaml` の `playback_volume`）。
+    let volume: Float
+
+    public init(volume: Float = 1.0) {
+        self.volume = min(max(volume, 0.0), 1.0)
+    }
 
     public func play(_ wav: Data) async throws {
         let player = try AVAudioPlayer(data: wav)
+        player.volume = volume
         let duration = player.duration
         guard player.play() else {
             throw AudioError.playbackFailed

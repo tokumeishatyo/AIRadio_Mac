@@ -69,5 +69,6 @@ struct ThemeSequencerTests {
             try await sequencer.run(theme: makeTheme(tagline: nil), announcement: "本文", speakerId: 3)
         }
         #expect(spotify.events.contains(.pause))  // §3-1 完全静寂を保証
+        #expect(spotify.events.last == .setVolume(80))  // ダッキング中の停止でも音量をフルへ復元
     }
 }

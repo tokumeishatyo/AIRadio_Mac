@@ -6,10 +6,13 @@ import AIRadioCore
 public struct TtsConfig: Sendable, Equatable {
     public var endpoint: String
     public var credit: String
+    /// 合成音声の再生音量（0.0–1.0）。Spotify の音楽とのバランス調整用。
+    public var playbackVolume: Double
 
-    public init(endpoint: String, credit: String) {
+    public init(endpoint: String, credit: String, playbackVolume: Double = 1.0) {
         self.endpoint = endpoint
         self.credit = credit
+        self.playbackVolume = min(max(playbackVolume, 0.0), 1.0)
     }
 }
 
@@ -21,6 +24,7 @@ public enum TtsConfigLoader {
             let credit: String?
         }
         let voicevox: Voicevox?
+        let playback_volume: Double?
     }
 
     /// YAML 文字列から `TtsConfig` を構築する。
@@ -32,7 +36,11 @@ public enum TtsConfigLoader {
         else {
             throw ConfigError.missingField("voicevox.endpoint")
         }
-        return TtsConfig(endpoint: endpoint, credit: voicevox.credit ?? "")
+        return TtsConfig(
+            endpoint: endpoint,
+            credit: voicevox.credit ?? "",
+            playbackVolume: file.playback_volume ?? 1.0
+        )
     }
 
     /// ファイルパスから読み込む。

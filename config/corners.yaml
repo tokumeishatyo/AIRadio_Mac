@@ -11,5 +11,5 @@ corners:
     chars_per_minute: 320
     song_prompt_hint: "テーマの余韻に合う、よく知られた邦楽・洋楽"
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
-    volume: 85
+    volume: 100
     play_seconds: 60

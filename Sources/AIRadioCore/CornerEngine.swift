@@ -48,8 +48,8 @@ public struct CornerEngine: CornerRunning, Sendable {
         do {
             try await perform(corner: corner, djs: djs)
         } catch {
-            // 完全静寂（§3-1）: エラー / キャンセルでも必ず曲を止める。
-            await spotify.pauseIgnoringCancellation()
+            // 完全静寂（§3-1）: エラー / キャンセルでも必ず曲を止め、音量をフルに戻す。
+            await spotify.pauseIgnoringCancellation(restoringVolume: corner.volume)
             throw error
         }
         try await spotify.pause()

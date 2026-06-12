@@ -3,7 +3,7 @@
 # themes: テーマのプール。準備のたびにランダムに 1 つ選ぶ（空・未指定なら theme 固定）。
 # fallback_track_uri は候補曲が全滅したときの保険
 # （共有 URL / spotify:track: / 裸 ID いずれも可、自動正規化）。
-# play_seconds: 締めの曲を頭から何秒かけるか。0 = 曲の長さぶんフル再生。
+# play_seconds: 締めの曲を頭から何秒かけるか。0 = 曲の長さぶんフル再生（既定。終端は位置読み直しで検知）。
 corners:
   - id: free_talk
     title: "フリートーク"
@@ -25,7 +25,7 @@ corners:
     song_prompt_hint: "テーマの余韻に合う、よく知られた邦楽・洋楽"
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
     volume: 100
-    play_seconds: 60
+    play_seconds: 0
   - id: letter
     title: "お便りのコーナー"
     format: letter
@@ -47,4 +47,4 @@ corners:
     song_prompt_hint: "お便りの内容に寄り添う、よく知られた邦楽・洋楽"
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
     volume: 100
-    play_seconds: 60
+    play_seconds: 0

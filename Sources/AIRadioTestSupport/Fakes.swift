@@ -197,6 +197,9 @@ public final class PlaybackSimulator: SpotifyController, Clock, @unchecked Senda
     private let legacyDurationOverride: Double?
     /// `playerState()` が最初に返す stale スナップショット列（切替直後の前曲応答などの再現）。
     private var staleSnapshots: [PlayerState]
+    /// `playerState()` の n 回目（1 始まり）の応答を stale に差し替える（再生途中の stale 混入の再現）。
+    private let staleByCall: [Int: PlayerState]
+    private var stateCalls = 0
     private var virtualTime: Double = 0
     private var currentUri: String?
     private var startedAt: Double = 0
@@ -208,12 +211,14 @@ public final class PlaybackSimulator: SpotifyController, Clock, @unchecked Senda
         durations: [String: Double],
         snapshotIncludesDuration: Bool = true,
         legacyDurationOverride: Double? = nil,
-        staleSnapshots: [PlayerState] = []
+        staleSnapshots: [PlayerState] = [],
+        staleByCall: [Int: PlayerState] = [:]
     ) {
         self.durations = durations
         self.snapshotIncludesDuration = snapshotIncludesDuration
         self.legacyDurationOverride = legacyDurationOverride
         self.staleSnapshots = staleSnapshots
+        self.staleByCall = staleByCall
     }
 
     public var sleeps: [Double] { lock.withLock { _sleeps } }
@@ -252,6 +257,8 @@ public final class PlaybackSimulator: SpotifyController, Clock, @unchecked Senda
 
     public func playerState() async throws -> PlayerState {
         lock.withLock {
+            stateCalls += 1
+            if let stale = staleByCall[stateCalls] { return stale }
             if !staleSnapshots.isEmpty { return staleSnapshots.removeFirst() }
             guard let uri = currentUri, !pausedFlag else {
                 return PlayerState(state: currentUri == nil ? .stopped : .paused, trackUri: currentUri)

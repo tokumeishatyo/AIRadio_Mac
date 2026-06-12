@@ -118,6 +118,8 @@ func makeBroadcastStack(
         print("    \(line.djId): \(line.text)")
     case .songStarted:
         print("  ♪ 再生中…")
+    case .songFinished(let reason):
+        print("  ♪ 曲終了（検知: \(reason.rawValue)）")
     }
 }
 
@@ -134,6 +136,8 @@ func makeBroadcastStack(
         print("    詳細: \(detail)")
     case .songStarted(_, let track):
         print("  ♪ \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
+    case .songFinished(_, let reason):
+        print("  ♪ 曲終了（検知: \(reason.rawValue)）")
     case .broadcastFinished:
         print("=== 放送終了 ===")
     }

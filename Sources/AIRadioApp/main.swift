@@ -193,6 +193,8 @@ func runCornerDemo() async {
                 case .songStarted(let track):
                     let label = track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)"
                     print("♪ 再生中: \(label)")
+                case .songFinished(let reason):
+                    print("♪ 曲終了（検知: \(reason.rawValue)）")
                 }
             }
         )

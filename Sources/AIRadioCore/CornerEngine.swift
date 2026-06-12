@@ -8,6 +8,8 @@ public enum CornerEvent: Sendable, Equatable {
     case scriptReady(lineCount: Int, totalCharacters: Int)
     case line(DialogueLine)
     case songStarted(TrackInfo)
+    /// 締め曲（フル再生時）の終端検知の理由（途中切り診断用、常時ログ）。
+    case songFinished(reason: TrackFinishReason)
 }
 
 /// 準備済みコーナー（LLM + TTS 処理の成果物。S10: 先行準備で生成し、本番で消費する）。
@@ -156,7 +158,8 @@ public struct CornerEngine: CornerRunning, Sendable {
             try await clock.sleep(seconds: Double(prepared.corner.playSeconds))
         } else {
             // 曲を終わりまで見届ける（URI 切替確認 + 実終端の検知。早切り・無音の過走を防ぐ、S10 fix）。
-            try await spotify.waitForTrackToFinish(of: prepared.song.uri, clock: clock)
+            let reason = try await spotify.waitForTrackToFinish(of: prepared.song.uri, clock: clock)
+            onEvent?(.songFinished(reason: reason))
         }
     }
 

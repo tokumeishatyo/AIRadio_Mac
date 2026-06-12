@@ -8,6 +8,8 @@ public enum BroadcastEvent: Sendable, Equatable {
     case segmentFailed(index: Int, kind: SegmentKind, code: String, detail: String)
     /// song セグメントの再生開始（曲名不明 = フォールバック曲のときは title/artist 空）。
     case songStarted(index: Int, track: TrackInfo)
+    /// song セグメント（フル再生）の終端検知の理由（途中切り診断用、常時ログ）。
+    case songFinished(index: Int, reason: TrackFinishReason)
     case broadcastFinished
 }
 
@@ -149,6 +151,9 @@ public struct BroadcastEngine: Sendable {
                         if error is CancellationError || Task.isCancelled {
                             throw CancellationError()
                         }
+                        // 失敗したセグメントが音を出したままのことがある（例: 曲再生後の待ちで
+                        // エラー）。次のセグメントと音が重ならないよう、ここでも静寂を保証する。
+                        await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.theme.volume)
                         // スキップして放送継続（fail-tolerant、E-RTM-SEGMENT-FAILED-001）。
                         let radioError = error as? RadioError
                         let code = radioError?.code ?? String(describing: type(of: error))
@@ -203,7 +208,8 @@ public struct BroadcastEngine: Sendable {
                 try await clock.sleep(seconds: Double(spec.playSeconds))
             } else {
                 // 曲を終わりまで見届ける（URI 切替確認 + 実終端の検知。早切り・無音の過走を防ぐ）。
-                try await spotify.waitForTrackToFinish(of: track.uri, clock: clock)
+                let reason = try await spotify.waitForTrackToFinish(of: track.uri, clock: clock)
+                onEvent?(.songFinished(index: index, reason: reason))
             }
             try await spotify.pause()
         case .talk:

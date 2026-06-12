@@ -95,7 +95,7 @@ final class MenuBarController: NSObject {
             stateItem.title = "放送中: \(kind.rawValue) (\(index + 1)/\(segmentCount))"
         case .segmentFailed(_, _, let code, _):
             lastErrorCode = code
-        case .segmentFinished, .songStarted, .broadcastFinished:
+        case .segmentFinished, .songStarted, .songFinished, .broadcastFinished:
             break
         }
     }

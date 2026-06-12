@@ -15,10 +15,34 @@ struct WaitForTrackToFinishTests {
     func waitsUntilNaturalEnd() async throws {
         let simulator = PlaybackSimulator(durations: [song: 355])
         try await simulator.play(uri: song)
-        try await simulator.waitForTrackToFinish(of: song, clock: simulator)
+        let reason = try await simulator.waitForTrackToFinish(of: song, clock: simulator)
         // 終端（355 秒）近くまで見届けている。まとめ寝は recheck（30 秒）以下のチャンクのみ。
         #expect(simulator.currentPositionSeconds >= 350)
         #expect(simulator.sleeps.allSatisfy { $0 <= 30 })
+        #expect(reason == .reachedEnd)
+    }
+
+    @Test("S12 fix-2 回帰: 再生途中のポーリングに stale な前曲スナップショットが紛れても切らない")
+    func transientStaleSnapshotMidPlaybackDoesNotCut() async throws {
+        // 実放送で再発した途中切りの想定原因: チャンク読み直しの 1 回が stale（前の曲・paused）を
+        // 返すと、旧実装は「別トラックへ遷移した」と 1 回の観測で確定して即 pause していた。
+        let stale = PlayerState(state: .paused, trackUri: opTheme, positionSeconds: 183, durationSeconds: 183)
+        let simulator = PlaybackSimulator(durations: [song: 355], staleByCall: [3: stale])
+        try await simulator.play(uri: song)
+        let reason = try await simulator.waitForTrackToFinish(of: song, clock: simulator)
+        #expect(simulator.currentPositionSeconds >= 350)   // 途中で切らず最後まで
+        #expect(reason == .reachedEnd)
+    }
+
+    @Test("本当に別トラックへ遷移したときは 2 回連続の観測で trackChanged を返す")
+    func confirmedTrackChangeReturnsTrackChanged() async throws {
+        let other = PlayerState(
+            state: .playing, trackUri: "spotify:track:OTHER", positionSeconds: 10, durationSeconds: 200)
+        let simulator = PlaybackSimulator(durations: [song: 355], staleByCall: [3: other, 4: other])
+        try await simulator.play(uri: song)
+        let reason = try await simulator.waitForTrackToFinish(of: song, clock: simulator)
+        #expect(reason == .trackChanged)
+        #expect(simulator.currentPositionSeconds < 350)   // 遷移を確認したら粘らず戻る
     }
 
     @Test("S12 回帰: 別問い合わせの曲長が前の曲（183 秒）でも、同一スナップショットの曲長で最後まで待つ")

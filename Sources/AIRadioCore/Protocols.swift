@@ -53,6 +53,20 @@ extension SpotifyController {
     }
 }
 
+/// `waitForTrackToFinish` の復帰理由（診断ログ用。途中切り調査で常時可視化、S12 fix-2）。
+public enum TrackFinishReason: String, Sendable {
+    /// 再生停止を 2 回連続で確認（曲の自然終了 or 外部からの停止）
+    case stopped
+    /// 別トラックへの遷移を 2 回連続で確認
+    case trackChanged
+    /// 再生位置が終端に到達
+    case reachedEnd
+    /// 終端付近で位置が停滞（曲は実質終わっている）
+    case positionStalled
+    /// 安全弁による打ち切り（待ち時間の上限到達。位置が進まない・切替未確認等の異常系）
+    case timedOut
+}
+
 extension SpotifyController {
     /// 指定 URI の曲を**終わりまで見届けて**戻る（S10 fix、S12 fix で stale 耐性を強化）。
     /// 1) URI 切替確認: 再生切替直後は `/me/player` が**前の曲のメタデータ**を返すことがあるため、
@@ -64,8 +78,15 @@ extension SpotifyController {
     ///    自己修正されるため、誤った残り時間を最後まで信じて早切りしない。タイマーの遅延
     ///    （App Nap 等。実測 350 秒寝で +23 秒）があっても読み直し基準なのでデッドエアが伸びない。
     /// 3) 実終端の検知: 「停止 / 別トラックへ遷移 / 再生位置が終端到達 / **位置が進んでいない**」の
-    ///    いずれかで即座に戻る。曲が終わっても is_playing=true を返し続ける Spotify の癖があっても、
+    ///    いずれかで戻る。曲が終わっても is_playing=true を返し続ける Spotify の癖があっても、
     ///    位置の停滞（0.5 秒間隔で不変）で確実に抜けられる。
+    ///
+    /// **終了らしき観測はすべて二重確認する（S12 fix-2）**: `/me/player` は再生中でも稀に stale な
+    /// スナップショット（前の曲・paused 等）を返すことが実測されている。「別トラックに遷移した」
+    /// 「停止した」を 1 回の観測で確定すると、その瞬間に呼び出し側の pause が走って曲の途中切りになる。
+    /// 一拍（`endPollSeconds`）おいた再観測でも同じ結論のときだけ終了と確定する。
+    /// 戻り値は復帰理由（診断ログ用）。
+    @discardableResult
     public func waitForTrackToFinish(
         of uri: String,
         clock: any Clock,
@@ -74,7 +95,17 @@ extension SpotifyController {
         marginSeconds: Double = 5,
         endPollSeconds: Double = 0.5,
         recheckSeconds: Double = 30
-    ) async throws {
+    ) async throws -> TrackFinishReason {
+        // 終了らしき観測の二重確認。終了なら理由を、stale（再観測で再生中）なら nil + 最新状態を返す。
+        func confirmEnd(after first: PlayerState) async throws -> (reason: TrackFinishReason?, latest: PlayerState) {
+            if first.state == .playing, first.trackUri == uri { return (nil, first) }
+            try await clock.sleep(seconds: endPollSeconds)
+            let second = try await playerState()
+            if second.state == .playing, second.trackUri == uri { return (nil, second) }  // stale を踏んだだけ
+            if let other = second.trackUri, other != uri { return (.trackChanged, second) }
+            return (.stopped, second)
+        }
+
         // 1) URI 切替確認 + 同一スナップショットの曲長・位置
         var duration = 0.0
         var position = 0.0
@@ -103,37 +134,31 @@ extension SpotifyController {
             let remaining = duration - position
             if remaining <= marginSeconds { break }
             let nap = min(remaining - marginSeconds, recheckSeconds)
-            guard budget >= nap else { return }
+            guard budget >= nap else { return .timedOut }
             try await clock.sleep(seconds: nap)
             budget -= nap
 
-            let state = try await playerState()
-            guard state.trackUri == uri else { return }   // 別トラックへ遷移 = この曲は終わった
-            if state.state != .playing {
-                // 停止に見えても stale の可能性があるため、一拍おいて再確認してから確定する。
-                try await clock.sleep(seconds: endPollSeconds)
-                let recheck = try await playerState()
-                guard recheck.state == .playing, recheck.trackUri == uri else { return }
-                position = recheck.positionSeconds
-                if recheck.durationSeconds > 0 { duration = recheck.durationSeconds }
-                continue
-            }
-            position = state.positionSeconds
-            if state.durationSeconds > 0 { duration = state.durationSeconds }
+            let observed = try await playerState()
+            let (reason, latest) = try await confirmEnd(after: observed)
+            if let reason { return reason }
+            position = latest.positionSeconds
+            if latest.durationSeconds > 0 { duration = latest.durationSeconds }
         }
 
         // 3) 実終端の検知（margin + 10 秒で打ち切り = 暴走防止の保険）
         var lastPosition = -1.0
         var waited = 0.0
         while waited < marginSeconds + 10 {
-            let state = try await playerState()
-            guard state.state == .playing, state.trackUri == uri else { return }
-            if duration > 0, state.positionSeconds >= duration - 1 { return }
-            if state.positionSeconds == lastPosition { return }
-            lastPosition = state.positionSeconds
+            let observed = try await playerState()
+            let (reason, latest) = try await confirmEnd(after: observed)
+            if let reason { return reason }
+            if duration > 0, latest.positionSeconds >= duration - 1 { return .reachedEnd }
+            if latest.positionSeconds == lastPosition { return .positionStalled }
+            lastPosition = latest.positionSeconds
             try await clock.sleep(seconds: endPollSeconds)
             waited += endPollSeconds
         }
+        return .timedOut
     }
 }
 

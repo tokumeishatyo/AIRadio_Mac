@@ -78,6 +78,30 @@ extension SpotifyController {
         // 切替を確認できなかった場合のフォールバック（曲長 0 なら待たずに次へ進む）。
         return try await currentTrackDurationSeconds()
     }
+
+    /// 残り時間ぶん待って曲の終わりまで付き合う。ただし終端の `marginSeconds` 手前からは
+    /// 実際の再生停止をポーリングし、**止まった瞬間に戻る**（S10 fix）。
+    /// 曲長メタデータの誤差や末尾の無音で「曲が終わったのに待ち続ける」デッドエアを最小化する。
+    public func waitUntilTrackEnds(
+        remainingSeconds: Double,
+        clock: any Clock,
+        marginSeconds: Double = 5,
+        pollIntervalSeconds: Double = 0.5
+    ) async throws {
+        let bulk = max(remainingSeconds - marginSeconds, 0)
+        if bulk > 0 {
+            try await clock.sleep(seconds: bulk)
+        }
+        // 過走防止: margin + 10 秒で打ち切り（メタデータより実曲が長いケースの保険）。
+        var waited = 0.0
+        let cap = marginSeconds + 10
+        while waited < cap {
+            let state = try await playerState()
+            if state.state != .playing { return }
+            try await clock.sleep(seconds: pollIntervalSeconds)
+            waited += pollIntervalSeconds
+        }
+    }
 }
 
 /// 会話コーナーの準備（LLM 処理、無音）と本番（発話 + 曲）。`CornerEngine` が準拠。

@@ -345,9 +345,10 @@ struct BroadcastEngineTests {
             ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F", playSeconds: 0)),
         ])
         try await engine.run(program: songProgram, corners: [], djs: djs)
-        // ポーリング（0.2s × 2）の後、新曲の長さ 240 秒で待つ（30 秒で早切りしない）。
-        #expect(clock.sleeps.last == 240)
+        // ポーリング（0.2s × 2）の後、新曲の残り 240 - margin(5) = 235 秒で待つ（30 秒側で早切りしない）。
+        #expect(clock.sleeps.contains(235))
         #expect(!clock.sleeps.contains(30))
+        #expect(!clock.sleeps.contains(25))
     }
 
     @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")

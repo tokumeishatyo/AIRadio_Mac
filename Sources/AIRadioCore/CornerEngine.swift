@@ -8,16 +8,19 @@ public enum CornerEvent: Sendable, Equatable {
     case songStarted(TrackInfo)
 }
 
-/// 準備済みコーナー（LLM 処理の成果物。S10: 先行準備で生成し、本番で消費する）。
+/// 準備済みコーナー（LLM + TTS 処理の成果物。S10: 先行準備で生成し、本番で消費する）。
 public struct PreparedCorner: Sendable, Equatable {
     public let corner: CornerTemplate
     public let song: TrackInfo
     public let script: DialogueScript
+    /// 台本各行の合成済み音声（行数と一致。本番の TTS 待ちをゼロにする）。
+    public let lineAudio: [Data]
 
-    public init(corner: CornerTemplate, song: TrackInfo, script: DialogueScript) {
+    public init(corner: CornerTemplate, song: TrackInfo, script: DialogueScript, lineAudio: [Data] = []) {
         self.corner = corner
         self.song = song
         self.script = script
+        self.lineAudio = lineAudio
     }
 }
 
@@ -73,7 +76,14 @@ public struct CornerEngine: CornerRunning, Sendable {
         let script = try await generator.generate(corner: corner, djs: cast, song: song)
         onEvent?(.scriptReady(lineCount: script.lines.count, totalCharacters: script.totalCharacters))
 
-        return PreparedCorner(corner: corner, song: song, script: script)
+        // 3. 全行を事前合成（本番の TTS 待ちをゼロに。準備は OP・冒頭曲の再生中に進む）
+        var lineAudio: [Data] = []
+        lineAudio.reserveCapacity(script.lines.count)
+        for line in script.lines {
+            lineAudio.append(try await tts.synthesize(text: line.text, speakerId: speakerId(for: line, cast: cast)))
+        }
+
+        return PreparedCorner(corner: corner, song: song, script: script, lineAudio: lineAudio)
     }
 
     /// 本番（発話 + 一曲。正常・例外・キャンセルいずれも最後は必ず pause）。
@@ -99,36 +109,44 @@ public struct CornerEngine: CornerRunning, Sendable {
 
     private func perform(prepared: PreparedCorner, cast: [DjProfile]) async throws {
         // 3. 発話
-        try await speak(script: prepared.script, cast: cast)
+        try await speak(prepared: prepared, cast: cast)
 
         // 4. 一曲
         try await spotify.play(uri: prepared.song.uri)
         try await spotify.setVolume(prepared.corner.volume)
         onEvent?(.songStarted(prepared.song))
-        let playSeconds: Double
         if prepared.corner.playSeconds > 0 {
-            playSeconds = Double(prepared.corner.playSeconds)
+            try await clock.sleep(seconds: Double(prepared.corner.playSeconds))
         } else {
-            // URI 切替確認つきの残り秒数（切替直後に前の曲の長さを読むと早切りする、S10 fix）。
-            playSeconds = try await spotify.remainingSeconds(of: prepared.song.uri, clock: clock)
+            // URI 切替確認つきの残り秒数を取り、終端は実停止のポーリングで「終わった瞬間」に進む（S10 fix）。
+            let remaining = try await spotify.remainingSeconds(of: prepared.song.uri, clock: clock)
+            try await spotify.waitUntilTrackEnds(remainingSeconds: remaining, clock: clock)
         }
-        try await clock.sleep(seconds: playSeconds)
     }
 
-    /// 台本を 1 行ずつ再生する。次の行は現在行の再生中に先行合成し、行間の無音を最小化する。
-    private func speak(script: DialogueScript, cast: [DjProfile]) async throws {
-        func speakerId(for line: DialogueLine) -> Int {
-            cast.first { $0.id == line.djId }?.speakerId ?? cast[0].speakerId
+    private func speakerId(for line: DialogueLine, cast: [DjProfile]) -> Int {
+        cast.first { $0.id == line.djId }?.speakerId ?? cast[0].speakerId
+    }
+
+    /// 台本を 1 行ずつ再生する。事前合成済み音声があればそれを使い（TTS 待ちゼロ）、
+    /// なければ次の行を現在行の再生中に先行合成する（互換パス）。
+    private func speak(prepared: PreparedCorner, cast: [DjProfile]) async throws {
+        let lines = prepared.script.lines
+        if prepared.lineAudio.count == lines.count {
+            for (line, wav) in zip(lines, prepared.lineAudio) {
+                onEvent?(.line(line))
+                try await audio.play(wav)
+            }
+            return
         }
 
-        let lines = script.lines
         guard let first = lines.first else { return }
-        var pending = try await tts.synthesize(text: first.text, speakerId: speakerId(for: first))
+        var pending = try await tts.synthesize(text: first.text, speakerId: speakerId(for: first, cast: cast))
         for index in lines.indices {
             onEvent?(.line(lines[index]))
             if index + 1 < lines.count {
                 let next = lines[index + 1]
-                async let prefetch = tts.synthesize(text: next.text, speakerId: speakerId(for: next))
+                async let prefetch = tts.synthesize(text: next.text, speakerId: speakerId(for: next, cast: cast))
                 try await audio.play(pending)
                 pending = try await prefetch
             } else {

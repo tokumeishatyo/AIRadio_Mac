@@ -84,11 +84,13 @@ struct CornerEngineTests {
         #expect(fixture.clock.sleeps == [60])
     }
 
-    @Test("play_seconds=0 なら曲の長さぶん待つ（フル再生）")
-    func fullPlaybackUsesTrackDuration() async throws {
+    @Test("play_seconds=0 は残り 5 秒まで待ち、終端は実停止をポーリング（フル再生）")
+    func fullPlaybackWaitsThenPollsForTrackEnd() async throws {
         let fixture = Fixture(durationSeconds: 240)
         try await fixture.engine.run(corner: corner(playSeconds: 0), djs: djs)
-        #expect(fixture.clock.sleeps == [240])
+        // 240 - margin(5) = 235 秒のまとめ待ち → 以降は 0.5 秒間隔のポーリング。
+        #expect(fixture.clock.sleeps.first == 235)
+        #expect(fixture.clock.sleeps.dropFirst().allSatisfy { $0 == 0.5 })
     }
 
     @Test("台本生成失敗は準備段階（無音）のエラー: 音は出ておらず pause 不要")

@@ -192,14 +192,13 @@ public struct BroadcastEngine: Sendable {
             try await spotify.play(uri: track.uri)
             try await spotify.setVolume(spec.volume)
             onEvent?(.songStarted(index: index, track: track))
-            let playSeconds: Double
             if spec.playSeconds > 0 {
-                playSeconds = Double(spec.playSeconds)
+                try await clock.sleep(seconds: Double(spec.playSeconds))
             } else {
-                // URI 切替確認つきの残り秒数（切替直後に前の曲の長さを読むと早切りする）。
-                playSeconds = try await spotify.remainingSeconds(of: track.uri, clock: clock)
+                // URI 切替確認つきの残り秒数を取り、終端は実停止のポーリングで「終わった瞬間」に進む。
+                let remaining = try await spotify.remainingSeconds(of: track.uri, clock: clock)
+                try await spotify.waitUntilTrackEnds(remainingSeconds: remaining, clock: clock)
             }
-            try await clock.sleep(seconds: playSeconds)
             try await spotify.pause()
         case .talk:
             // 先行準備の完了を待つ（通常は冒頭曲の再生中に完了しており待ち時間ゼロ）。

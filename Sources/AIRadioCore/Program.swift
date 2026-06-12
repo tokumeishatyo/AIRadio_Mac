@@ -15,11 +15,14 @@ public struct ProgramSegment: Sendable, Equatable {
     public var cornerId: String?
     /// true なら失敗時にスキップせず放送を中止する（Windows 版踏襲。既定の番組では OP に設定）。
     public var critical: Bool
+    /// テーマ系セグメント（opening / news / ending）の読み上げ DJ。nil なら `anchor_dj_id`。
+    public var djId: String?
 
-    public init(kind: SegmentKind, cornerId: String? = nil, critical: Bool = false) {
+    public init(kind: SegmentKind, cornerId: String? = nil, critical: Bool = false, djId: String? = nil) {
         self.kind = kind
         self.cornerId = cornerId
         self.critical = critical
+        self.djId = djId
     }
 }
 
@@ -53,10 +56,18 @@ public struct BroadcastThemes: Sendable, Equatable {
     public var opening: ThemedAnnouncement
     public var news: ThemeConfig
     public var ending: ThemedAnnouncement
+    /// 時間帯挨拶（`{greeting}` プレースホルダの値、themes.yaml の `greetings:`）。
+    public var greetings: Greetings
 
-    public init(opening: ThemedAnnouncement, news: ThemeConfig, ending: ThemedAnnouncement) {
+    public init(
+        opening: ThemedAnnouncement,
+        news: ThemeConfig,
+        ending: ThemedAnnouncement,
+        greetings: Greetings = Greetings()
+    ) {
         self.opening = opening
         self.news = news
         self.ending = ending
+        self.greetings = greetings
     }
 }

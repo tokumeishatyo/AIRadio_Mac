@@ -9,5 +9,5 @@ weather:
   # https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json
   area_code: "130000"
   area_name: "東京地方"   # JSON 内の対象エリア名（areas[].area.name と一致させる）
-# {news} と {weather} に取得結果が入る。
-announcement_template: "本日のニュースをお伝えします。{news} 続いて、天気予報です。{weather} 以上、ニュースと天気予報でした。"
+# {news} と {weather} に取得結果が入る。{hour12}/{minute} は発話直前の時刻（themes.yaml のコメント参照）。
+announcement_template: "時刻は{hour12}時{minute}分になりました。ニュースの時間です。{news} 続いて、天気予報です。{weather} 以上、ニュースと天気予報でした。"

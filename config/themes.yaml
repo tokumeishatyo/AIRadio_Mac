@@ -4,6 +4,15 @@
 # 演出: (tagline) → BGM フル音量 intro_seconds → ducked_volume へ → 発話 →
 #       曲の「残り outro_seconds 秒」へシーク → フル音量に戻す → 曲の終わりで停止
 #       （シーク位置 = 曲の長さ - outro_seconds。曲の自然な終わりで終わる）
+# 時間帯ごとの挨拶（{greeting} の値。境界はコード側: 朝5-11時/昼12-16時/夜17-4時、Windows版踏襲）
+greetings:
+  morning: "おはようございます"
+  afternoon: "こんにちは"
+  evening: "こんばんは"
+
+# announcement では時刻プレースホルダが使える（発話直前に展開、仕様 s8 §3）:
+#   {greeting} 時間帯挨拶 / {month}月 {day}日 / {ampm}{hour}時 = 午前/午後+NHK式12時間 /
+#   {hour12}時{minute}分 = 午前午後なしの12時間表記
 opening:
   tagline: "ずんだもんの ケイラボAIラジオ"
   track_uri: "https://open.spotify.com/intl-ja/track/5jsqaNOAbeBG5QYL7JpySJ?si=5c452cc8429d4c49"
@@ -11,7 +20,7 @@ opening:
   volume: 85
   ducked_volume: 35
   outro_seconds: 10
-  announcement: "こんばんは。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。"
+  announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。"
 
 news:
   tagline: "ニュースと天気予報です"

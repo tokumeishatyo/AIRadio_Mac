@@ -253,12 +253,14 @@ func runBroadcastDemo() async {
             themes: BroadcastThemes(
                 opening: ThemedAnnouncement(theme: themes.opening.theme, announcement: themes.opening.announcement),
                 news: themes.news.theme,
-                ending: ThemedAnnouncement(theme: themes.ending.theme, announcement: themes.ending.announcement)
+                ending: ThemedAnnouncement(theme: themes.ending.theme, announcement: themes.ending.announcement),
+                greetings: themes.greetings
             ),
             themeSequencer: ThemeSequencer(tts: tts, audio: audio, spotify: spotify, clock: clock),
             cornerRunner: cornerEngine,
             newsProvider: newsProvider,
             spotify: spotify,
+            clock: clock,
             onEvent: { event in
                 switch event {
                 case .segmentStarted(let index, let kind):

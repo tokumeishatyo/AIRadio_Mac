@@ -21,6 +21,24 @@ struct ThemeConfigLoaderTests {
       announcement: "ED本文"
     """
 
+    @Test func loadsGreetings() throws {
+        let yaml = validYaml + """
+
+        greetings:
+          morning: "おはようなのだ"
+          afternoon: "こんにちはなのだ"
+          evening: "こんばんはなのだ"
+        """
+        let themes = try ThemeConfigLoader.load(yaml: yaml)
+        #expect(themes.greetings == Greetings(
+            morning: "おはようなのだ", afternoon: "こんにちはなのだ", evening: "こんばんはなのだ"))
+    }
+
+    @Test func greetingsDefaultWhenOmitted() throws {
+        let themes = try ThemeConfigLoader.load(yaml: validYaml)
+        #expect(themes.greetings == Greetings())  // おはようございます / こんにちは / こんばんは
+    }
+
     @Test func loadsAndNormalizesOpening() throws {
         let themes = try ThemeConfigLoader.load(yaml: validYaml)
         #expect(themes.opening.theme.trackUri == "spotify:track:ABC")  // 共有 URL を正規化

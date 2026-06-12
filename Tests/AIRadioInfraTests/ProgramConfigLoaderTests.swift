@@ -31,6 +31,21 @@ struct ProgramConfigLoaderTests {
         ))
     }
 
+    @Test("dj_id を読み込む（省略時 nil = anchor を使う）")
+    func loadsSegmentDjId() throws {
+        let yaml = """
+        program:
+          anchor_dj_id: zundamon
+          segments:
+            - type: opening
+            - type: news
+              dj_id: ryusei
+        """
+        let program = try ProgramConfigLoader.load(yaml: yaml)
+        #expect(program.segments[0].djId == nil)
+        #expect(program.segments[1].djId == "ryusei")
+    }
+
     @Test("critical を読み込む（省略時 false）")
     func loadsCritical() throws {
         let yaml = """

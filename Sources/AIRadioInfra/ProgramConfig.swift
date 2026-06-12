@@ -10,6 +10,7 @@ public enum ProgramConfigLoader {
                 let type: String?
                 let corner_id: String?
                 let critical: Bool?
+                let dj_id: String?
             }
             let title: String?
             let anchor_dj_id: String?
@@ -38,9 +39,12 @@ public enum ProgramConfigLoader {
                 guard let cornerId = segment.corner_id, !cornerId.isEmpty else {
                     throw ConfigError.missingField("program.segments[\(index)].corner_id (talk)")
                 }
-                return ProgramSegment(kind: kind, cornerId: cornerId, critical: segment.critical ?? false)
+                return ProgramSegment(
+                    kind: kind, cornerId: cornerId,
+                    critical: segment.critical ?? false, djId: segment.dj_id
+                )
             }
-            return ProgramSegment(kind: kind, critical: segment.critical ?? false)
+            return ProgramSegment(kind: kind, critical: segment.critical ?? false, djId: segment.dj_id)
         }
         return Program(
             title: program.title ?? "ケイラボAIラジオ",

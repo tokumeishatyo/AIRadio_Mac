@@ -8,11 +8,12 @@ public struct LoadedTheme: Sendable, Equatable {
     public let announcement: String
 }
 
-/// OP / ニュース / ED の 3 テーマ。
+/// OP / ニュース / ED の 3 テーマ + 時間帯挨拶。
 public struct ThemesConfig: Sendable, Equatable {
     public let opening: LoadedTheme
     public let news: LoadedTheme
     public let ending: LoadedTheme
+    public let greetings: Greetings
 }
 
 /// `config/themes.yaml` のローダ。
@@ -27,17 +28,29 @@ public enum ThemeConfigLoader {
             let outro_seconds: Int?
             let announcement: String?
         }
+        struct GreetingsSection: Decodable {
+            let morning: String?
+            let afternoon: String?
+            let evening: String?
+        }
         let opening: Segment?
         let news: Segment?
         let ending: Segment?
+        let greetings: GreetingsSection?
     }
 
     public static func load(yaml: String) throws -> ThemesConfig {
         let file = try YAMLDecoder().decode(File.self, from: yaml)
+        let defaults = Greetings()
         return ThemesConfig(
             opening: try build(file.opening, name: "opening"),
             news: try build(file.news, name: "news"),
-            ending: try build(file.ending, name: "ending")
+            ending: try build(file.ending, name: "ending"),
+            greetings: Greetings(
+                morning: file.greetings?.morning ?? defaults.morning,
+                afternoon: file.greetings?.afternoon ?? defaults.afternoon,
+                evening: file.greetings?.evening ?? defaults.evening
+            )
         )
     }
 

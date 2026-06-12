@@ -57,6 +57,7 @@ private struct Fixture {
             cornerRunner: cornerRunner,
             newsProvider: FakeAnnouncementProvider(script: newsScript),
             spotify: spotify,
+            clock: FakeClock(),
             onEvent: { recorder.append($0) }
         )
     }
@@ -131,6 +132,7 @@ struct BroadcastEngineTests {
             cornerRunner: SelfCancellingRunner(),
             newsProvider: FakeAnnouncementProvider(script: "x"),
             spotify: spotify,
+            clock: FakeClock(),
             onEvent: { recorder.append($0) }
         )
         await #expect(throws: CancellationError.self) {
@@ -160,6 +162,7 @@ struct BroadcastEngineTests {
             cornerRunner: cornerRunner,
             newsProvider: FakeAnnouncementProvider(script: "x"),
             spotify: spotify,
+            clock: FakeClock(),
             onEvent: { recorder.append($0) }
         )
         let criticalProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
@@ -208,7 +211,8 @@ struct BroadcastEngineTests {
             themeSequencer: SpyThemeSequencer(),
             cornerRunner: SelfCancellingRunner(),
             newsProvider: FakeAnnouncementProvider(script: "x"),
-            spotify: spotify
+            spotify: spotify,
+            clock: FakeClock()
         )
         await #expect(throws: CancellationError.self) {
             try await engine.run(program: program, corners: [freeTalk], djs: djs)
@@ -227,6 +231,60 @@ struct BroadcastEngineTests {
         }
         #expect(fixture.sequencer.runs.isEmpty)
         #expect(fixture.recorder.events.isEmpty || !fixture.recorder.events.contains(.broadcastFinished))
+    }
+
+    @Test("時刻プレースホルダを発話直前に展開（OP は挨拶+日付+NHK 式、ニュースは 12 時間表記）")
+    func expandsTimePlaceholders() async throws {
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tokyo
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 15, minute: 7))!
+
+        let timeThemes = BroadcastThemes(
+            opening: ThemedAnnouncement(
+                theme: theme("spotify:track:OP"),
+                announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。"),
+            news: theme("spotify:track:NEWS"),
+            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+        )
+        let sequencer = SpyThemeSequencer()
+        let engine = BroadcastEngine(
+            themes: timeThemes,
+            themeSequencer: sequencer,
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "時刻は{hour12}時{minute}分になりました。ニュースの時間です。"),
+            spotify: FakeSpotifyController(),
+            clock: FakeClock(now: now),
+            timeZone: tokyo
+        )
+        try await engine.run(program: program, corners: [freeTalk], djs: djs)
+        #expect(sequencer.runs[0].announcement == "こんにちは。6月12日、午後3時になりました。")
+        #expect(sequencer.runs[1].announcement == "時刻は3時7分になりました。ニュースの時間です。")
+        #expect(sequencer.runs[2].announcement == "ED")
+    }
+
+    @Test("テーマ系セグメントの dj_id で読み上げ DJ を切り替え（ニュース=青山龍星）")
+    func newsUsesSegmentDj() async throws {
+        let cast = djs + [DjProfile(id: "ryusei", name: "青山龍星", speakerId: 13, persona: "")]
+        let withNewsDj = Program(title: "t", anchorDjId: "zundamon", segments: [
+            ProgramSegment(kind: .opening),
+            ProgramSegment(kind: .news, djId: "ryusei"),
+            ProgramSegment(kind: .ending),
+        ])
+        let fixture = Fixture()
+        try await fixture.engine.run(program: withNewsDj, corners: [], djs: cast)
+        #expect(fixture.sequencer.runs.map(\.speakerId) == [3, 13, 3])
+    }
+
+    @Test("未定義の dj_id は fail-fast")
+    func unknownSegmentDjFailsFast() async {
+        let fixture = Fixture()
+        let broken = Program(title: "t", anchorDjId: "zundamon",
+                             segments: [ProgramSegment(kind: .news, djId: "nobody")])
+        await #expect(throws: ConfigError.self) {
+            try await fixture.engine.run(program: broken, corners: [], djs: djs)
+        }
+        #expect(fixture.sequencer.runs.isEmpty)
     }
 
     @Test("未定義の anchor_dj_id は fail-fast")

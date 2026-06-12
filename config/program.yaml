@@ -2,6 +2,7 @@
 # type: opening / talk / news / ending（talk は corners.yaml の corner_id 必須）
 # anchor_dj_id: opening / news / ending の読み上げ担当（djs.yaml の id)
 # critical: true のセグメントは失敗時にスキップせず放送を中止する（既定 false）
+# dj_id: テーマ系セグメント（opening/news/ending）の読み上げ DJ を個別指定（未指定は anchor_dj_id）
 program:
   title: "ケイラボAIラジオ"
   anchor_dj_id: zundamon
@@ -11,4 +12,5 @@ program:
     - type: talk
       corner_id: free_talk
     - type: news
+      dj_id: ryusei
     - type: ending

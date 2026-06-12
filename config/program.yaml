@@ -9,6 +9,13 @@ program:
   segments:
     - type: opening
       critical: true
+    # 冒頭曲（本日の 1 曲目）。放送開始時に選曲し、OP の {first_song} で曲振りされる。
+    # この曲が流れている間にトークの台本生成が完了する（切れ目ない放送、仕様 s10）。
+    - type: song
+      song_prompt_hint: "一日の始まりや番組の幕開けに合う、前向きで広く知られた曲"
+      fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
+      volume: 100
+      play_seconds: 0     # 0 = フル再生
     - type: talk
       corner_id: free_talk
     - type: news

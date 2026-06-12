@@ -11,6 +11,10 @@ public enum ProgramConfigLoader {
                 let corner_id: String?
                 let critical: Bool?
                 let dj_id: String?
+                let song_prompt_hint: String?
+                let fallback_track_uri: String?
+                let volume: Int?
+                let play_seconds: Int?
             }
             let title: String?
             let anchor_dj_id: String?
@@ -35,7 +39,8 @@ public enum ProgramConfigLoader {
                 throw ConfigError.missingField(
                     "program.segments[\(index)].type が不正: \(segment.type ?? "(なし)")")
             }
-            if kind == .talk {
+            switch kind {
+            case .talk:
                 guard let cornerId = segment.corner_id, !cornerId.isEmpty else {
                     throw ConfigError.missingField("program.segments[\(index)].corner_id (talk)")
                 }
@@ -43,8 +48,23 @@ public enum ProgramConfigLoader {
                     kind: kind, cornerId: cornerId,
                     critical: segment.critical ?? false, djId: segment.dj_id
                 )
+            case .song:
+                guard let fallback = segment.fallback_track_uri, !fallback.isEmpty else {
+                    throw ConfigError.missingField("program.segments[\(index)].fallback_track_uri (song)")
+                }
+                return ProgramSegment(
+                    kind: kind,
+                    critical: segment.critical ?? false,
+                    song: SongSegmentSpec(
+                        promptHint: segment.song_prompt_hint ?? "",
+                        fallbackTrackUri: SpotifyURI.normalizeTrack(fallback),
+                        volume: segment.volume ?? 100,
+                        playSeconds: segment.play_seconds ?? 0
+                    )
+                )
+            default:
+                return ProgramSegment(kind: kind, critical: segment.critical ?? false, djId: segment.dj_id)
             }
-            return ProgramSegment(kind: kind, critical: segment.critical ?? false, djId: segment.dj_id)
         }
         return Program(
             title: program.title ?? "ケイラボAIラジオ",

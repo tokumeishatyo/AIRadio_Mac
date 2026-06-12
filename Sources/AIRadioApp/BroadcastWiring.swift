@@ -81,6 +81,11 @@ func makeBroadcastStack(
         themeSequencer: ThemeSequencer(tts: tts, audio: audio, spotify: spotify, clock: clock),
         cornerRunner: cornerEngine,
         newsProvider: newsProvider,
+        songPicker: SongPicker(
+            llm: GeminiLLMBackend(config: llmConfig, http: http),
+            searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
+            temperature: llmConfig.temperature
+        ),
         spotify: spotify,
         clock: clock,
         onEvent: onBroadcastEvent
@@ -113,6 +118,8 @@ func makeBroadcastStack(
         let error = BroadcastError.segmentFailed(code)
         print("=== [\(index + 1)] \(kind.rawValue) エラー[\(error.code)]: \(error.message) ===")
         print("    詳細: \(detail)")
+    case .songStarted(_, let track):
+        print("  ♪ \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
     case .broadcastFinished:
         print("=== 放送終了 ===")
     }

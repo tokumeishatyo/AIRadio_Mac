@@ -1,9 +1,27 @@
 import Foundation
 
-/// コーナーの締め曲を決める。LLM にテーマに合う候補曲を挙げさせ、
-/// プレフライト（検索 + 再生可否）で最初に再生可能な曲を確定する（CLAUDE.md §3-2）。
-/// 全滅・検索不調の場合はテンプレートの `fallback_track_uri` に倒す（曲名不明のまま返す）。
-public struct SongPicker: Sendable {
+/// 選曲の依頼内容（コーナーの締め曲・番組の冒頭曲などで共用）。
+public struct SongRequest: Sendable, Equatable {
+    /// 用途の説明（例: 「ラジオコーナー「フリートーク」（テーマ: …）の締めにかける曲」）。
+    public var context: String
+    public var promptHint: String
+    public var fallbackTrackUri: String
+
+    public init(context: String, promptHint: String = "", fallbackTrackUri: String) {
+        self.context = context
+        self.promptHint = promptHint
+        self.fallbackTrackUri = fallbackTrackUri
+    }
+}
+
+/// 選曲の抽象（`SongPicker` が準拠。テストで fake 差し替え）。
+public protocol SongPicking: Sendable {
+    func pick(_ request: SongRequest) async throws -> TrackInfo
+}
+
+/// LLM に候補曲を挙げさせ、プレフライト（検索 + 再生可否）で最初に再生可能な曲を確定する
+/// （CLAUDE.md §3-2）。全滅・検索不調の場合は `fallbackTrackUri` に倒す（曲名不明のまま返す）。
+public struct SongPicker: SongPicking {
     public static let maxCandidates = 5
 
     private let llm: any LLMBackend
@@ -16,8 +34,8 @@ public struct SongPicker: Sendable {
         self.temperature = temperature
     }
 
-    public func pick(corner: CornerTemplate) async throws -> TrackInfo {
-        let raw = try await llm.generate(Self.makeRequest(corner: corner, temperature: temperature))
+    public func pick(_ request: SongRequest) async throws -> TrackInfo {
+        let raw = try await llm.generate(Self.makeRequest(request, temperature: temperature))
         for candidate in Self.parseCandidates(raw).prefix(Self.maxCandidates) {
             // 候補単位の検索失敗は握り潰して次の候補へ（fail-tolerant）。
             let results = (try? await searcher.search(
@@ -27,21 +45,21 @@ public struct SongPicker: Sendable {
                 return track
             }
         }
-        return TrackInfo(uri: corner.fallbackTrackUri, title: "", artist: "")
+        return TrackInfo(uri: request.fallbackTrackUri, title: "", artist: "")
     }
 
     // MARK: - プロンプト構築
 
-    public static func makeRequest(corner: CornerTemplate, temperature: Double = 0.9) -> LLMRequest {
+    public static func makeRequest(_ request: SongRequest, temperature: Double = 0.9) -> LLMRequest {
         var prompt = """
-        ラジオコーナー「\(corner.title)」（テーマ: \(corner.theme)）の締めにかける曲の候補を \(maxCandidates) 曲挙げてください。
+        \(request.context)の候補を \(maxCandidates) 曲挙げてください。
 
         # 制約
         - 出力は 1 行につき 1 曲、「曲名 - アーティスト名」の形式のみ。番号・説明・装飾は書かない。
         - 実在する曲だけを挙げる（Spotify で配信されている可能性が高いもの）。
         """
-        if !corner.songPromptHint.isEmpty {
-            prompt += "\n- 選曲のヒント: \(corner.songPromptHint)"
+        if !request.promptHint.isEmpty {
+            prompt += "\n- 選曲のヒント: \(request.promptHint)"
         }
         return LLMRequest(prompt: prompt, temperature: temperature)
     }

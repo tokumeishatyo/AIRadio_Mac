@@ -8,12 +8,23 @@ public enum CornerEvent: Sendable, Equatable {
     case songStarted(TrackInfo)
 }
 
-/// コーナー 1 本の進行。基本パターン:
-/// 1. 選曲（プレフライト先行、CLAUDE.md §3-2）
-/// 2. 台本生成（確定済みの曲を会話の締めで紹介させる）
-/// 3. 発話（1 行ずつ、その DJ の声で合成 → 再生。次行は再生中に先行合成）
-/// 4. 一曲（`play_seconds` 秒、0 なら曲の長さぶん）
-/// 5. 後始末（正常・例外・キャンセルいずれも最後は必ず pause、CLAUDE.md §3-1）
+/// 準備済みコーナー（LLM 処理の成果物。S10: 先行準備で生成し、本番で消費する）。
+public struct PreparedCorner: Sendable, Equatable {
+    public let corner: CornerTemplate
+    public let song: TrackInfo
+    public let script: DialogueScript
+
+    public init(corner: CornerTemplate, song: TrackInfo, script: DialogueScript) {
+        self.corner = corner
+        self.song = song
+        self.script = script
+    }
+}
+
+/// コーナー 1 本の進行。**準備（LLM 処理、無音）と本番（発話 + 曲）の 2 段**:
+/// 1. prepare: 選曲（プレフライト先行、CLAUDE.md §3-2）→ 台本生成（確定曲を締めで紹介）
+/// 2. run(prepared:): 発話（次行を先行合成）→ 一曲 → 必ず pause（CLAUDE.md §3-1）
+/// 先行準備（S10）により、本番開始時に LLM 待ちのデッドエアが発生しない。
 public struct CornerEngine: CornerRunning, Sendable {
     private let llm: any LLMBackend
     private let tts: any TTSBackend
@@ -44,28 +55,17 @@ public struct CornerEngine: CornerRunning, Sendable {
         self.onEvent = onEvent
     }
 
-    public func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
-        do {
-            try await perform(corner: corner, djs: djs)
-        } catch {
-            // 完全静寂（§3-1）: エラー / キャンセルでも必ず曲を止め、音量をフルに戻す。
-            await spotify.pauseIgnoringCancellation(restoringVolume: corner.volume)
-            throw error
-        }
-        try await spotify.pause()
-    }
-
-    private func perform(corner: CornerTemplate, djs: [DjProfile]) async throws {
-        let cast = try corner.djIds.map { id in
-            guard let dj = djs.first(where: { $0.id == id }) else {
-                throw ConfigError.missingField("corners.dj_ids に未定義の DJ: \(id)")
-            }
-            return dj
-        }
+    /// 準備（LLM 処理のみ。音を出さないため失敗時の pause も不要）。
+    public func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+        let cast = try resolveCast(corner: corner, djs: djs)
 
         // 1. 選曲（曲紹介テキストの生成より前に再生可否を確定する）
         let picker = SongPicker(llm: llm, searcher: searcher, temperature: temperature)
-        let song = try await picker.pick(corner: corner)
+        let song = try await picker.pick(SongRequest(
+            context: "ラジオコーナー「\(corner.title)」（テーマ: \(corner.theme)）の締めにかける曲",
+            promptHint: corner.songPromptHint,
+            fallbackTrackUri: corner.fallbackTrackUri
+        ))
         onEvent?(.songPicked(song))
 
         // 2. 台本生成
@@ -73,16 +73,41 @@ public struct CornerEngine: CornerRunning, Sendable {
         let script = try await generator.generate(corner: corner, djs: cast, song: song)
         onEvent?(.scriptReady(lineCount: script.lines.count, totalCharacters: script.totalCharacters))
 
+        return PreparedCorner(corner: corner, song: song, script: script)
+    }
+
+    /// 本番（発話 + 一曲。正常・例外・キャンセルいずれも最後は必ず pause）。
+    public func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
+        do {
+            try await perform(prepared: prepared, cast: try resolveCast(corner: prepared.corner, djs: djs))
+        } catch {
+            // 完全静寂（§3-1）: エラー / キャンセルでも必ず曲を止め、音量をフルに戻す。
+            await spotify.pauseIgnoringCancellation(restoringVolume: prepared.corner.volume)
+            throw error
+        }
+        try await spotify.pause()
+    }
+
+    private func resolveCast(corner: CornerTemplate, djs: [DjProfile]) throws -> [DjProfile] {
+        try corner.djIds.map { id in
+            guard let dj = djs.first(where: { $0.id == id }) else {
+                throw ConfigError.missingField("corners.dj_ids に未定義の DJ: \(id)")
+            }
+            return dj
+        }
+    }
+
+    private func perform(prepared: PreparedCorner, cast: [DjProfile]) async throws {
         // 3. 発話
-        try await speak(script: script, cast: cast)
+        try await speak(script: prepared.script, cast: cast)
 
         // 4. 一曲
-        try await spotify.play(uri: song.uri)
-        try await spotify.setVolume(corner.volume)
-        onEvent?(.songStarted(song))
+        try await spotify.play(uri: prepared.song.uri)
+        try await spotify.setVolume(prepared.corner.volume)
+        onEvent?(.songStarted(prepared.song))
         let playSeconds: Double
-        if corner.playSeconds > 0 {
-            playSeconds = Double(corner.playSeconds)
+        if prepared.corner.playSeconds > 0 {
+            playSeconds = Double(prepared.corner.playSeconds)
         } else {
             playSeconds = try await spotify.currentTrackDurationSeconds()
         }

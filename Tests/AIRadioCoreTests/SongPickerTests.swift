@@ -3,13 +3,10 @@ import Testing
 import AIRadioCore
 import AIRadioTestSupport
 
-private func corner() -> CornerTemplate {
-    CornerTemplate(
-        id: "free_talk",
-        title: "フリートーク",
-        theme: "最近気になっていること",
-        djIds: ["zundamon", "metan"],
-        songPromptHint: "落ち着いた曲",
+private func request() -> SongRequest {
+    SongRequest(
+        context: "ラジオコーナー「フリートーク」（テーマ: 最近気になっていること）の締めにかける曲",
+        promptHint: "落ち着いた曲",
         fallbackTrackUri: "spotify:track:FALLBACK"
     )
 }
@@ -60,7 +57,7 @@ struct SongPickerPickTests {
             TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI", isPlayable: true),
         ])
         let picker = SongPicker(llm: llm, searcher: searcher)
-        let track = try await picker.pick(corner: corner())
+        let track = try await picker.pick(request())
         #expect(track.uri == "spotify:track:OK")
         #expect(searcher.queries == ["夜に駆ける YOASOBI"])
     }
@@ -70,7 +67,7 @@ struct SongPickerPickTests {
         let llm = ScriptedLLM(responses: ["夜に駆ける - YOASOBI\nLemon - 米津玄師"])
         let searcher = FakeTrackSearcher(results: [])
         let picker = SongPicker(llm: llm, searcher: searcher)
-        let track = try await picker.pick(corner: corner())
+        let track = try await picker.pick(request())
         #expect(track.uri == "spotify:track:FALLBACK")
         #expect(track.title.isEmpty)
         #expect(track.artist.isEmpty)
@@ -80,7 +77,7 @@ struct SongPickerPickTests {
     func toleratesSearchFailure() async throws {
         let llm = ScriptedLLM(responses: ["夜に駆ける - YOASOBI"])
         let picker = SongPicker(llm: llm, searcher: ThrowingSearcher())
-        let track = try await picker.pick(corner: corner())
+        let track = try await picker.pick(request())
         #expect(track.uri == "spotify:track:FALLBACK")
     }
 
@@ -88,13 +85,13 @@ struct SongPickerPickTests {
     func propagatesLlmFailure() async {
         let picker = SongPicker(llm: ScriptedLLM(responses: []), searcher: FakeTrackSearcher())
         await #expect(throws: LLMError.self) {
-            _ = try await picker.pick(corner: corner())
+            _ = try await picker.pick(request())
         }
     }
 
     @Test("選曲プロンプトにテーマとヒントが入る")
     func promptContainsThemeAndHint() {
-        let request = SongPicker.makeRequest(corner: corner())
+        let request = SongPicker.makeRequest(request())
         #expect(request.prompt.contains("最近気になっていること"))
         #expect(request.prompt.contains("落ち着いた曲"))
         #expect(request.prompt.contains("曲名 - アーティスト名"))

@@ -53,9 +53,19 @@ extension SpotifyController {
     }
 }
 
-/// 会話コーナー 1 本の実行（`CornerEngine` が準拠。テストで fake 差し替え）。
+/// 会話コーナーの準備（LLM 処理、無音）と本番（発話 + 曲）。`CornerEngine` が準拠。
+/// 分離により、先行準備（S10）で放送中のデッドエアを避けられる。
 public protocol CornerRunning: Sendable {
-    func run(corner: CornerTemplate, djs: [DjProfile]) async throws
+    func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner
+    func run(prepared: PreparedCorner, djs: [DjProfile]) async throws
+}
+
+extension CornerRunning {
+    /// 準備 + 本番を続けて実行（単発デモ用の互換 API）。
+    public func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+        let prepared = try await prepare(corner: corner, djs: djs)
+        try await run(prepared: prepared, djs: djs)
+    }
 }
 
 /// 読み上げ原稿の生成（`NewsWeatherProvider` が準拠。fail-tolerant 前提で throw しない）。

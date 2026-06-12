@@ -91,15 +91,30 @@ struct CornerEngineTests {
         #expect(fixture.clock.sleeps == [240])
     }
 
-    @Test("台本生成失敗でも必ず pause（完全静寂）して投げ直す")
-    func pausesOnScriptFailure() async {
-        // 2 回目の LLM 応答（台本）が形式不正 → パース失敗。
+    @Test("台本生成失敗は準備段階（無音）のエラー: 音は出ておらず pause 不要")
+    func scriptFailureHappensSilentlyInPreparation() async {
+        // 2 回目の LLM 応答（台本）が形式不正 → パース失敗（prepare 内）。
         let fixture = Fixture(responses: [candidatesResponse, "形式不正の応答"])
         await #expect(throws: LLMError.self) {
             try await fixture.engine.run(corner: corner(), djs: djs)
         }
         #expect(fixture.audio.played.isEmpty)
-        #expect(fixture.spotify.events == [.pause, .setVolume(85)])  // 静寂 + 音量復元
+        #expect(fixture.spotify.events.isEmpty)  // prepare は音を出さない
+    }
+
+    @Test("prepare は LLM 成果物を返し、run(prepared:) は LLM を呼ばずに本番だけ行う")
+    func prepareAndRunAreSeparated() async throws {
+        let fixture = Fixture()
+        let prepared = try await fixture.engine.prepare(corner: corner(playSeconds: 60), djs: djs)
+        #expect(prepared.song.uri == "spotify:track:OK")
+        #expect(prepared.script.lines.count == 4)
+        #expect(fixture.llm.requests.count == 2)       // 選曲 + 台本
+        #expect(fixture.audio.played.isEmpty)          // 準備では音を出さない
+
+        try await fixture.engine.run(prepared: prepared, djs: djs)
+        #expect(fixture.llm.requests.count == 2)       // 本番で LLM は呼ばれない
+        #expect(fixture.audio.played.count == 4)
+        #expect(fixture.spotify.events == [.play("spotify:track:OK"), .setVolume(85), .pause])
     }
 
     @Test("未定義の DJ id は設定エラー")

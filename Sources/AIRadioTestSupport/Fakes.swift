@@ -74,16 +74,47 @@ public final class SpyThemeSequencer: ThemeSequencing, @unchecked Sendable {
     }
 }
 
-/// コーナー実行を記録する CornerRunning。コーナー id ごとにエラーを注入できる。
+/// コーナーの準備・実行を記録する CornerRunning。コーナー id ごとにエラーを注入できる（prepare で投げる）。
 public final class FakeCornerRunner: CornerRunning, @unchecked Sendable {
     private let lock = NSLock()
+    private var _preparedCornerIds: [String] = []
     private var _ranCornerIds: [String] = []
+    private var _ranPrepared: [PreparedCorner] = []
     private let errors: [String: any Error & Sendable]
     public init(errors: [String: any Error & Sendable] = [:]) { self.errors = errors }
+    public var preparedCornerIds: [String] { lock.withLock { _preparedCornerIds } }
     public var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
-    public func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
-        lock.withLock { _ranCornerIds.append(corner.id) }
+    public var ranPrepared: [PreparedCorner] { lock.withLock { _ranPrepared } }
+
+    public func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+        lock.withLock { _preparedCornerIds.append(corner.id) }
         if let error = errors[corner.id] { throw error }
+        return PreparedCorner(
+            corner: corner,
+            song: TrackInfo(uri: "spotify:track:PREPARED-\(corner.id)", title: "T", artist: "A"),
+            script: DialogueScript(lines: [DialogueLine(djId: corner.djIds.first ?? "", text: "準備済み")])
+        )
+    }
+
+    public func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
+        lock.withLock {
+            _ranCornerIds.append(prepared.corner.id)
+            _ranPrepared.append(prepared)
+        }
+    }
+}
+
+/// 固定の選曲結果（またはエラー）を返す SongPicking。依頼内容を記録する。
+public final class FakeSongPicker: SongPicking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requests: [SongRequest] = []
+    private let result: Result<TrackInfo, any Error>
+    public init(track: TrackInfo) { result = .success(track) }
+    public init(error: any Error & Sendable) { result = .failure(error) }
+    public var requests: [SongRequest] { lock.withLock { _requests } }
+    public func pick(_ request: SongRequest) async throws -> TrackInfo {
+        lock.withLock { _requests.append(request) }
+        return try result.get()
     }
 }
 

@@ -118,7 +118,11 @@ struct BroadcastEngineTests {
         // Infra 層は URLSession の取消をドメインエラーにラップすることがある。
         // タスクがキャンセル済みなら、それをセグメント失敗と誤判定してはならない。
         struct SelfCancellingRunner: CornerRunning {
-            func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+                PreparedCorner(corner: corner, song: TrackInfo(uri: "x", title: "", artist: ""),
+                               script: DialogueScript(lines: []))
+            }
+            func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
                 withUnsafeCurrentTask { $0?.cancel() }
                 throw SpotifyError.authFailed("request cancelled")
             }
@@ -200,7 +204,11 @@ struct BroadcastEngineTests {
             func currentTrackDurationSeconds() async throws -> Double { 0 }
         }
         struct SelfCancellingRunner: CornerRunning {
-            func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+                PreparedCorner(corner: corner, song: TrackInfo(uri: "x", title: "", artist: ""),
+                               script: DialogueScript(lines: []))
+            }
+            func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
                 withUnsafeCurrentTask { $0?.cancel() }
                 throw CancellationError()
             }
@@ -219,6 +227,130 @@ struct BroadcastEngineTests {
         }
         #expect(!spotify.pauseCancelledFlags.isEmpty)
         #expect(spotify.pauseCancelledFlags.allSatisfy { $0 == false })
+    }
+
+    @Test("song セグメント: 先行選曲した曲を再生し、OP の {first_song} で曲振りされる")
+    func songSegmentPlaysPickedTrackAndFeedsOpening() async throws {
+        let songThemes = BroadcastThemes(
+            opening: ThemedAnnouncement(
+                theme: theme("spotify:track:OP"),
+                announcement: "それでは聴いてください。{first_song}。"),
+            news: theme("spotify:track:NEWS"),
+            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+        )
+        let picker = FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "夜に駆ける", artist: "YOASOBI"))
+        let sequencer = SpyThemeSequencer()
+        let spotify = FakeSpotifyController()
+        let recorder = EventRecorder()
+        let engine = BroadcastEngine(
+            themes: songThemes,
+            themeSequencer: sequencer,
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            songPicker: picker,
+            spotify: spotify,
+            clock: FakeClock(),
+            onEvent: { recorder.append($0) }
+        )
+        let songProgram = Program(title: "テスト番組", anchorDjId: "zundamon", segments: [
+            ProgramSegment(kind: .opening),
+            ProgramSegment(kind: .song, song: SongSegmentSpec(
+                promptHint: "幕開けの曲", fallbackTrackUri: "spotify:track:FALLBACK", volume: 100, playSeconds: 45)),
+            ProgramSegment(kind: .ending),
+        ])
+        try await engine.run(program: songProgram, corners: [], djs: djs)
+
+        // OP の曲振りに確定曲が入る。
+        #expect(sequencer.runs[0].announcement == "それでは聴いてください。YOASOBIで、「夜に駆ける」。")
+        // song セグメント: 再生 → 音量 → pause。
+        #expect(spotify.events.prefix(3) == [.play("spotify:track:FIRST"), .setVolume(100), .pause])
+        #expect(recorder.events.contains(
+            .songStarted(index: 1, track: TrackInfo(uri: "spotify:track:FIRST", title: "夜に駆ける", artist: "YOASOBI"))))
+        // 選曲依頼にヒントが渡る。
+        #expect(picker.requests.first?.promptHint == "幕開けの曲")
+    }
+
+    @Test("選曲失敗・picker なしはフォールバック曲に倒し、曲振りは「本日の一曲」")
+    func songSegmentFallsBackOnPickerFailure() async throws {
+        let songThemes = BroadcastThemes(
+            opening: ThemedAnnouncement(
+                theme: theme("spotify:track:OP"), announcement: "{first_song}。"),
+            news: theme("spotify:track:NEWS"),
+            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+        )
+        let sequencer = SpyThemeSequencer()
+        let spotify = FakeSpotifyController()
+        let engine = BroadcastEngine(
+            themes: songThemes,
+            themeSequencer: sequencer,
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            songPicker: FakeSongPicker(error: LLMError.emptyResponse),
+            spotify: spotify,
+            clock: FakeClock()
+        )
+        let songProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
+            ProgramSegment(kind: .opening),
+            ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:FALLBACK")),
+        ])
+        try await engine.run(program: songProgram, corners: [], djs: djs)
+        #expect(sequencer.runs[0].announcement == "本日の一曲。")
+        #expect(spotify.events.contains(.play("spotify:track:FALLBACK")))
+    }
+
+    @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")
+    func talkUsesPreparedContent() async throws {
+        let fixture = Fixture()
+        try await fixture.engine.run(program: program, corners: [freeTalk], djs: djs)
+        #expect(fixture.cornerRunner.preparedCornerIds == ["free_talk"])
+        // run(prepared:) に prepare の成果物がそのまま渡る（本番での LLM 再実行なし）。
+        #expect(fixture.cornerRunner.ranPrepared.map(\.song.uri) == ["spotify:track:PREPARED-free_talk"])
+    }
+
+    @Test("停止時は先行準備タスクもキャンセルされる")
+    func cancellationCancelsPreparations() async {
+        final class BlockingPrepareRunner: CornerRunning, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _sawCancellation = false
+            var sawCancellation: Bool { lock.withLock { _sawCancellation } }
+            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+                lock.withLock { _sawCancellation = true }
+                throw CancellationError()
+            }
+            func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {}
+        }
+        let runner = BlockingPrepareRunner()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: SpyThemeSequencer(),
+            cornerRunner: runner,
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            spotify: FakeSpotifyController(),
+            clock: FakeClock()
+        )
+        let broadcast = Task {
+            try await engine.run(
+                program: Program(title: "t", anchorDjId: "zundamon",
+                                 segments: [ProgramSegment(kind: .talk, cornerId: "free_talk")]),
+                corners: [freeTalk], djs: djs)
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        broadcast.cancel()
+        let result = await broadcast.result
+        if case .failure(let error) = result {
+            #expect(error is CancellationError)
+        } else {
+            Issue.record("キャンセルで失敗するはず")
+        }
+        // 準備タスクがキャンセルを観測するまで待つ（非同期完了）。
+        for _ in 0..<100 {
+            if runner.sawCancellation { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(runner.sawCancellation)
     }
 
     @Test("未定義の corner_id は fail-fast（音を出す前に設定エラー）")

@@ -31,6 +31,38 @@ struct ProgramConfigLoaderTests {
         ))
     }
 
+    @Test("song セグメントを読み込む（URI 正規化 + 既定値）")
+    func loadsSongSegment() throws {
+        let yaml = """
+        program:
+          anchor_dj_id: zundamon
+          segments:
+            - type: song
+              song_prompt_hint: "幕開けの曲"
+              fallback_track_uri: "https://open.spotify.com/track/5jsqaNOAbeBG5QYL7JpySJ?si=x"
+        """
+        let segment = try ProgramConfigLoader.load(yaml: yaml).segments[0]
+        #expect(segment.kind == .song)
+        #expect(segment.song == SongSegmentSpec(
+            promptHint: "幕開けの曲",
+            fallbackTrackUri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ",
+            volume: 100,
+            playSeconds: 0
+        ))
+    }
+
+    @Test("song の fallback_track_uri 欠落は設定エラー")
+    func songWithoutFallbackThrows() {
+        #expect(throws: ConfigError.self) {
+            _ = try ProgramConfigLoader.load(yaml: """
+            program:
+              anchor_dj_id: z
+              segments:
+                - type: song
+            """)
+        }
+    }
+
     @Test("dj_id を読み込む（省略時 nil = anchor を使う）")
     func loadsSegmentDjId() throws {
         let yaml = """

@@ -20,7 +20,7 @@ opening:
   volume: 100
   ducked_volume: 35
   outro_seconds: 10
-  announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。"
+  announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。それでは早速聴いてもらうのだ。{first_song}。"
 
 news:
   tagline: "ニュースと天気予報です"

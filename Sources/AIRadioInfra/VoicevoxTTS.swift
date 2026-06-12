@@ -6,10 +6,13 @@ import AIRadioCore
 public struct VoicevoxTTS: TTSBackend {
     private let base: URL
     private let http: any HTTPClient
+    /// 話速（VOICEVOX の speedScale、1.0 = 標準）。`config/tts.yaml` の `speed_scale`。
+    private let speedScale: Double
 
-    public init(endpoint: String, http: any HTTPClient) {
+    public init(endpoint: String, http: any HTTPClient, speedScale: Double = 1.0) {
         self.base = URL(string: endpoint) ?? URL(string: "http://127.0.0.1:50021/")!
         self.http = http
+        self.speedScale = speedScale
     }
 
     public func synthesize(text: String, speakerId: Int) async throws -> Data {
@@ -25,7 +28,7 @@ public struct VoicevoxTTS: TTSBackend {
             ])
             let wav = try await http.post(
                 url: synthURL,
-                body: query,
+                body: try applySpeed(to: query),
                 headers: ["Content-Type": "application/json"]
             )
             return wav
@@ -36,6 +39,16 @@ public struct VoicevoxTTS: TTSBackend {
         } catch {
             throw TtsError.synthesisFailed(String(describing: error))
         }
+    }
+
+    /// audio_query の結果 JSON に話速（speedScale）を適用する。標準速（1.0）なら無加工で返す。
+    private func applySpeed(to query: Data) throws -> Data {
+        guard speedScale != 1.0 else { return query }
+        guard var object = try JSONSerialization.jsonObject(with: query) as? [String: Any] else {
+            throw TtsError.synthesisFailed("audio_query の応答を解釈できません")
+        }
+        object["speedScale"] = speedScale
+        return try JSONSerialization.data(withJSONObject: object)
     }
 
     private func makeURL(_ path: String, _ items: [URLQueryItem]) -> URL {

@@ -30,6 +30,14 @@ struct TtsConfigLoaderTests {
         #expect(try TtsConfigLoader.load(yaml: base + "playback_volume: -0.5").playbackVolume == 0.0)
     }
 
+    @Test func loadsAndClampsSpeedScale() throws {
+        let base = "voicevox:\n  endpoint: \"http://x/\"\n"
+        #expect(try TtsConfigLoader.load(yaml: base).speedScale == 1.0)  // 省略時は標準速
+        #expect(try TtsConfigLoader.load(yaml: base + "speed_scale: 1.15").speedScale == 1.15)
+        #expect(try TtsConfigLoader.load(yaml: base + "speed_scale: 5.0").speedScale == 2.0)
+        #expect(try TtsConfigLoader.load(yaml: base + "speed_scale: 0.1").speedScale == 0.5)
+    }
+
     @Test func missingEndpointThrowsConfigError() {
         let yaml = """
         voicevox:

@@ -8,11 +8,14 @@ public struct TtsConfig: Sendable, Equatable {
     public var credit: String
     /// 合成音声の再生音量（0.0–1.0）。Spotify の音楽とのバランス調整用。
     public var playbackVolume: Double
+    /// 話速（VOICEVOX speedScale、1.0 = 標準。0.5–2.0 にクランプ）。
+    public var speedScale: Double
 
-    public init(endpoint: String, credit: String, playbackVolume: Double = 1.0) {
+    public init(endpoint: String, credit: String, playbackVolume: Double = 1.0, speedScale: Double = 1.0) {
         self.endpoint = endpoint
         self.credit = credit
         self.playbackVolume = min(max(playbackVolume, 0.0), 1.0)
+        self.speedScale = min(max(speedScale, 0.5), 2.0)
     }
 }
 
@@ -25,6 +28,7 @@ public enum TtsConfigLoader {
         }
         let voicevox: Voicevox?
         let playback_volume: Double?
+        let speed_scale: Double?
     }
 
     /// YAML 文字列から `TtsConfig` を構築する。
@@ -39,7 +43,8 @@ public enum TtsConfigLoader {
         return TtsConfig(
             endpoint: endpoint,
             credit: voicevox.credit ?? "",
-            playbackVolume: file.playback_volume ?? 1.0
+            playbackVolume: file.playback_volume ?? 1.0,
+            speedScale: file.speed_scale ?? 1.0
         )
     }
 

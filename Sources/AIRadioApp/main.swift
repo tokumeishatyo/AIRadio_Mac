@@ -37,7 +37,7 @@ func runTtsDemo() async {
     print("ケイラボAIラジオ Mac版 — TTS デモ（VOICEVOX）")
     do {
         let config = try TtsConfigLoader.load(path: "config/tts.yaml")
-        let tts = VoicevoxTTS(endpoint: config.endpoint, http: URLSessionHTTPClient())
+        let tts = VoicevoxTTS(endpoint: config.endpoint, http: URLSessionHTTPClient(), speedScale: config.speedScale)
         let wav = try await tts.synthesize(text: "こんにちは。ケイラボAIラジオのテストなのだ。", speakerId: 3)
         print("合成成功: \(wav.count) bytes")
         try await AVAudioPlayerBackend(volume: Float(config.playbackVolume)).play(wav)
@@ -103,7 +103,7 @@ func runThemeDemo() async {
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
         let sequencer = ThemeSequencer(
-            tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
+            tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http, speedScale: ttsConfig.speedScale),
             audio: AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume)),
             spotify: try makeSpotifyController(auth: auth, http: http),
             clock: SystemClock()
@@ -173,7 +173,7 @@ func runCornerDemo() async {
         let auth = try makeSpotifyAuth()
         let engine = CornerEngine(
             llm: GeminiLLMBackend(config: llmConfig, http: http),
-            tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
+            tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http, speedScale: ttsConfig.speedScale),
             audio: AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume)),
             searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
             spotify: try makeSpotifyController(auth: auth, http: http),
@@ -218,7 +218,7 @@ func runBroadcastDemo() async {
 
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
-        let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http)
+        let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http, speedScale: ttsConfig.speedScale)
         let audio = AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume))
         let spotify = try makeSpotifyController(auth: auth, http: http)
         let clock = SystemClock()

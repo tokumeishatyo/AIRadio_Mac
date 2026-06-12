@@ -54,52 +54,55 @@ extension SpotifyController {
 }
 
 extension SpotifyController {
-    /// 指定 URI の「残り再生秒数」（曲長 − 現在位置）。
-    /// 再生切替の直後は `/me/player` のメタデータが**前の曲のまま**返ることがあるため、
-    /// URI の切替を確認してから曲長を読む（読み違えると前の曲の長さだけ待って早切りする、S10 fix）。
-    public func remainingSeconds(
+    /// 指定 URI の曲を**終わりまで見届けて**戻る（S10 fix）。
+    /// 1) URI 切替確認: 再生切替直後は `/me/player` が**前の曲のメタデータ**を返すことがあるため、
+    ///    切替を確認してから曲長・位置を読む（読み違えると前の曲の長さで早切りする）。
+    /// 2) 終端 `marginSeconds` 手前までまとめて待つ。
+    /// 3) 実終端の検知: 「停止 / 別トラックへ遷移 / 再生位置が終端到達 / **位置が進んでいない**」の
+    ///    いずれかで即座に戻る。曲が終わっても is_playing=true を返し続ける Spotify の癖があっても、
+    ///    位置の停滞（0.5 秒間隔で不変）で確実に抜けられる。
+    public func waitForTrackToFinish(
         of uri: String,
         clock: any Clock,
-        pollIntervalSeconds: Double = 0.2,
-        maxAttempts: Int = 15
-    ) async throws -> Double {
-        for attempt in 0..<maxAttempts {
+        switchPollSeconds: Double = 0.2,
+        switchMaxAttempts: Int = 15,
+        marginSeconds: Double = 5,
+        endPollSeconds: Double = 0.5
+    ) async throws {
+        // 1) URI 切替確認 + 残り秒数の算出
+        var remaining = 0.0
+        var duration = 0.0
+        for attempt in 0..<switchMaxAttempts {
             let state = try await playerState()
             if state.trackUri == uri {
-                let duration = try await currentTrackDurationSeconds()
+                duration = try await currentTrackDurationSeconds()
                 if duration > 0 {
-                    return max(duration - state.positionSeconds, 0)
+                    remaining = max(duration - state.positionSeconds, 0)
+                    break
                 }
             }
-            if attempt < maxAttempts - 1 {
-                try await clock.sleep(seconds: pollIntervalSeconds)
+            if attempt < switchMaxAttempts - 1 {
+                try await clock.sleep(seconds: switchPollSeconds)
             }
         }
-        // 切替を確認できなかった場合のフォールバック（曲長 0 なら待たずに次へ進む）。
-        return try await currentTrackDurationSeconds()
-    }
 
-    /// 残り時間ぶん待って曲の終わりまで付き合う。ただし終端の `marginSeconds` 手前からは
-    /// 実際の再生停止をポーリングし、**止まった瞬間に戻る**（S10 fix）。
-    /// 曲長メタデータの誤差や末尾の無音で「曲が終わったのに待ち続ける」デッドエアを最小化する。
-    public func waitUntilTrackEnds(
-        remainingSeconds: Double,
-        clock: any Clock,
-        marginSeconds: Double = 5,
-        pollIntervalSeconds: Double = 0.5
-    ) async throws {
-        let bulk = max(remainingSeconds - marginSeconds, 0)
+        // 2) 終端 margin 手前までまとめて待つ
+        let bulk = max(remaining - marginSeconds, 0)
         if bulk > 0 {
             try await clock.sleep(seconds: bulk)
         }
-        // 過走防止: margin + 10 秒で打ち切り（メタデータより実曲が長いケースの保険）。
+
+        // 3) 実終端の検知（margin + 10 秒で打ち切り = 暴走防止の保険）
+        var lastPosition = -1.0
         var waited = 0.0
-        let cap = marginSeconds + 10
-        while waited < cap {
+        while waited < marginSeconds + 10 {
             let state = try await playerState()
-            if state.state != .playing { return }
-            try await clock.sleep(seconds: pollIntervalSeconds)
-            waited += pollIntervalSeconds
+            guard state.state == .playing, state.trackUri == uri else { return }
+            if duration > 0, state.positionSeconds >= duration - 1 { return }
+            if state.positionSeconds == lastPosition { return }
+            lastPosition = state.positionSeconds
+            try await clock.sleep(seconds: endPollSeconds)
+            waited += endPollSeconds
         }
     }
 }

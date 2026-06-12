@@ -195,9 +195,8 @@ public struct BroadcastEngine: Sendable {
             if spec.playSeconds > 0 {
                 try await clock.sleep(seconds: Double(spec.playSeconds))
             } else {
-                // URI 切替確認つきの残り秒数を取り、終端は実停止のポーリングで「終わった瞬間」に進む。
-                let remaining = try await spotify.remainingSeconds(of: track.uri, clock: clock)
-                try await spotify.waitUntilTrackEnds(remainingSeconds: remaining, clock: clock)
+                // 曲を終わりまで見届ける（URI 切替確認 + 実終端の検知。早切り・無音の過走を防ぐ）。
+                try await spotify.waitForTrackToFinish(of: track.uri, clock: clock)
             }
             try await spotify.pause()
         case .talk:

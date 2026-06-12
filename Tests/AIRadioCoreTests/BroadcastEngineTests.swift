@@ -351,6 +351,51 @@ struct BroadcastEngineTests {
         #expect(!clock.sleeps.contains(25))
     }
 
+    @Test("曲終了後も is_playing=true が返り続けても、位置の停滞で即座に次へ進む")
+    func detectsTrackEndByFrozenPosition() async throws {
+        // 終端で再生位置が止まったまま is_playing=true を返し続ける Spotify の癖を再現。
+        final class FrozenAtEndSpotify: SpotifyController, @unchecked Sendable {
+            private let lock = NSLock()
+            private var positions: [Double] = [195, 198, 198, 198, 198, 198]  // 198 で停滞
+            func play(uri: String) async throws {}
+            func pause() async throws {}
+            func setVolume(_ percent: Int) async throws {}
+            func seek(toSeconds seconds: Int) async throws {}
+            func playerState() async throws -> PlayerState {
+                lock.withLock {
+                    let position = positions.isEmpty ? 198 : positions.removeFirst()
+                    return PlayerState(state: .playing, trackUri: "spotify:track:FIRST", positionSeconds: position)
+                }
+            }
+            func currentTrackDurationSeconds() async throws -> Double { 200 }
+        }
+        final class SleepRecorder: Clock, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _sleeps: [Double] = []
+            let now = Date(timeIntervalSince1970: 0)
+            var sleeps: [Double] { lock.withLock { _sleeps } }
+            func sleep(seconds: Double) async throws { lock.withLock { _sleeps.append(seconds) } }
+        }
+        let clock = SleepRecorder()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: SpyThemeSequencer(),
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            songPicker: FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "T", artist: "A")),
+            spotify: FrozenAtEndSpotify(),
+            clock: clock
+        )
+        try await engine.run(
+            program: Program(title: "t", anchorDjId: "zundamon", segments: [
+                ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F")),
+            ]),
+            corners: [], djs: djs)
+        // 上限（margin+10 秒 = 0.5s × 20 ポーリング）まで粘らず、位置停滞の検知で数回のうちに抜ける。
+        let endPolls = clock.sleeps.filter { $0 == 0.5 }
+        #expect(endPolls.count <= 3)
+    }
+
     @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")
     func talkUsesPreparedContent() async throws {
         let fixture = Fixture()

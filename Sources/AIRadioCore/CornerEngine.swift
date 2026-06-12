@@ -118,9 +118,8 @@ public struct CornerEngine: CornerRunning, Sendable {
         if prepared.corner.playSeconds > 0 {
             try await clock.sleep(seconds: Double(prepared.corner.playSeconds))
         } else {
-            // URI 切替確認つきの残り秒数を取り、終端は実停止のポーリングで「終わった瞬間」に進む（S10 fix）。
-            let remaining = try await spotify.remainingSeconds(of: prepared.song.uri, clock: clock)
-            try await spotify.waitUntilTrackEnds(remainingSeconds: remaining, clock: clock)
+            // 曲を終わりまで見届ける（URI 切替確認 + 実終端の検知。早切り・無音の過走を防ぐ、S10 fix）。
+            try await spotify.waitForTrackToFinish(of: prepared.song.uri, clock: clock)
         }
     }
 

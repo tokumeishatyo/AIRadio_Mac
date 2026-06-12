@@ -4,8 +4,8 @@ import Foundation
 public enum BroadcastEvent: Sendable, Equatable {
     case segmentStarted(index: Int, kind: SegmentKind)
     case segmentFinished(index: Int, kind: SegmentKind)
-    /// セグメント失敗（スキップして継続）。code は基となったエラーのコード。
-    case segmentFailed(index: Int, kind: SegmentKind, code: String)
+    /// セグメント失敗（スキップして継続）。code / detail は基となったエラーのコードと詳細。
+    case segmentFailed(index: Int, kind: SegmentKind, code: String, detail: String)
     case broadcastFinished
 }
 
@@ -57,12 +57,20 @@ public struct BroadcastEngine: Sendable {
                 do {
                     try await perform(entry.segment.kind, corner: entry.corner, anchor: anchor, djs: djs)
                     onEvent?(.segmentFinished(index: index, kind: entry.segment.kind))
-                } catch is CancellationError {
-                    throw CancellationError()
                 } catch {
+                    // キャンセル中は Infra 層が URLSession の取消をドメインエラーにラップして
+                    // 投げてくることがある（例: E-SPT-AUTH-FAILED）。スキップと誤判定せず即時停止する。
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
                     // スキップして放送継続（fail-tolerant、E-RTM-SEGMENT-FAILED-001）。
-                    let code = (error as? RadioError)?.code ?? String(describing: error)
-                    onEvent?(.segmentFailed(index: index, kind: entry.segment.kind, code: code))
+                    let radioError = error as? RadioError
+                    onEvent?(.segmentFailed(
+                        index: index,
+                        kind: entry.segment.kind,
+                        code: radioError?.code ?? String(describing: type(of: error)),
+                        detail: radioError?.message ?? String(describing: error)
+                    ))
                 }
             }
         } catch {

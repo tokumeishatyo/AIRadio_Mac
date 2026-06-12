@@ -7,11 +7,19 @@ public struct SpotifyConfig: Sendable, Equatable {
     public var clientId: String
     public var redirectUri: String
     public var market: String
+    /// 再生先デバイス名（Spotify Connect の表示名）。nil なら type=Computer のデバイスを自動選択。
+    public var deviceName: String?
 
-    public init(clientId: String, redirectUri: String = "http://127.0.0.1:5543/callback", market: String = "JP") {
+    public init(
+        clientId: String,
+        redirectUri: String = "http://127.0.0.1:5543/callback",
+        market: String = "JP",
+        deviceName: String? = nil
+    ) {
         self.clientId = clientId
         self.redirectUri = redirectUri
         self.market = market
+        self.deviceName = deviceName
     }
 
     /// リダイレクト URI から待受ポートを導出する。
@@ -30,6 +38,7 @@ public enum SpotifyConfigLoader {
             let client_id: String?
             let redirect_uri: String?
             let market: String?
+            let device_name: String?
         }
         let spotify: Spotify?
     }
@@ -45,7 +54,8 @@ public enum SpotifyConfigLoader {
         return SpotifyConfig(
             clientId: clientId,
             redirectUri: spotify.redirect_uri ?? "http://127.0.0.1:5543/callback",
-            market: spotify.market ?? "JP"
+            market: spotify.market ?? "JP",
+            deviceName: spotify.device_name
         )
     }
 

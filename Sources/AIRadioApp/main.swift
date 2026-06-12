@@ -10,6 +10,9 @@ import AIRadioInfra
 //   AIRADIO_DEMO=corner        会話コーナー（LLM 台本 → DJ 二人の会話 → 一曲）
 //   AIRADIO_DEMO=broadcast     番組 1 周（OP → トーク → ニュース天気 → ED、Ctrl-C で停止）
 
+// リダイレクト時も進行ログが即時見えるよう、stdout を行バッファリングにする。
+setvbuf(stdout, nil, _IOLBF, 0)
+
 private let spotifyScopes = ["user-read-playback-state", "user-modify-playback-state"]
 
 private func makeSpotifyAuth() throws -> SpotifyAuth {
@@ -23,6 +26,11 @@ private func makeSpotifyAuth() throws -> SpotifyAuth {
         http: URLSessionHTTPClient(),
         clock: SystemClock()
     )
+}
+
+private func makeSpotifyController(auth: SpotifyAuth, http: any HTTPClient) throws -> WebApiSpotifyController {
+    let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    return WebApiSpotifyController(auth: auth, http: http, preferredDeviceName: config.deviceName)
 }
 
 func runTtsDemo() async {
@@ -62,7 +70,7 @@ func runSpotifyDemo() async {
         let auth = try makeSpotifyAuth()
         let http = URLSessionHTTPClient()
         let searcher = SpotifyWebSearcher(auth: auth, market: config.market, http: http)
-        let controller = WebApiSpotifyController(auth: auth, http: http)
+        let controller = try makeSpotifyController(auth: auth, http: http)
 
         let results = try await searcher.search(query: "YOASOBI アイドル", limit: 3)
         print("検索結果 \(results.count) 件:")
@@ -97,7 +105,7 @@ func runThemeDemo() async {
         let sequencer = ThemeSequencer(
             tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
             audio: AVAudioPlayerBackend(),
-            spotify: WebApiSpotifyController(auth: auth, http: http),
+            spotify: try makeSpotifyController(auth: auth, http: http),
             clock: SystemClock()
         )
         let speakerId = 3  // ずんだもん
@@ -168,7 +176,7 @@ func runCornerDemo() async {
             tts: VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http),
             audio: AVAudioPlayerBackend(),
             searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
-            spotify: WebApiSpotifyController(auth: auth, http: http),
+            spotify: try makeSpotifyController(auth: auth, http: http),
             clock: SystemClock(),
             temperature: llmConfig.temperature,
             onEvent: { event in
@@ -212,7 +220,7 @@ func runBroadcastDemo() async {
         let auth = try makeSpotifyAuth()
         let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http)
         let audio = AVAudioPlayerBackend()
-        let spotify = WebApiSpotifyController(auth: auth, http: http)
+        let spotify = try makeSpotifyController(auth: auth, http: http)
         let clock = SystemClock()
 
         let cornerEngine = CornerEngine(
@@ -257,9 +265,10 @@ func runBroadcastDemo() async {
                     print("=== [\(index + 1)] \(kind.rawValue) ===")
                 case .segmentFinished(let index, let kind):
                     print("=== [\(index + 1)] \(kind.rawValue) 完了 ===")
-                case .segmentFailed(let index, let kind, let code):
+                case .segmentFailed(let index, let kind, let code, let detail):
                     let error = BroadcastError.segmentFailed(code)
                     print("=== [\(index + 1)] \(kind.rawValue) エラー[\(error.code)]: \(error.message) ===")
+                    print("    詳細: \(detail)")
                 case .broadcastFinished:
                     print("=== 放送終了 ===")
                 }
@@ -286,12 +295,15 @@ case "broadcast":
     // 放送全体を 1 つの Task で回し、Ctrl-C（SIGINT）で Task.cancel()（CLAUDE.md §3-1）。
     let broadcastTask = Task { await runBroadcastDemo() }
     signal(SIGINT, SIG_IGN)
-    let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+    // 注意: ハンドラはトップレベル変数（MainActor 分離）に触るため、必ず main キューで動かす。
+    // .global() だと Swift 6 の実行時分離チェック（dispatch_assert_queue）で SIGTRAP クラッシュする。
+    let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
     sigint.setEventHandler {
         print("\n停止します…（後始末中）")
         broadcastTask.cancel()
     }
     sigint.resume()
+    print("(Ctrl-C で停止できます)")
     await broadcastTask.value
 default: await runTtsDemo()
 }

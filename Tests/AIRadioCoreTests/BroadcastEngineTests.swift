@@ -93,7 +93,8 @@ struct BroadcastEngineTests {
 
         // talk は失敗したが、news / ending は実行されて放送は最後まで進む。
         #expect(fixture.recorder.events.contains(
-            .segmentFailed(index: 1, kind: .talk, code: "E-LLM-EMPTY-RESPONSE-001")))
+            .segmentFailed(index: 1, kind: .talk, code: "E-LLM-EMPTY-RESPONSE-001",
+                           detail: LLMError.emptyResponse.message)))
         #expect(fixture.sequencer.runs.count == 3)
         #expect(fixture.recorder.events.last == .broadcastFinished)
         #expect(fixture.spotify.events.contains(.pause))
@@ -109,6 +110,38 @@ struct BroadcastEngineTests {
         #expect(fixture.sequencer.runs.count == 1)
         #expect(fixture.spotify.events.contains(.pause))
         #expect(!fixture.recorder.events.contains(.broadcastFinished))
+    }
+
+    @Test("キャンセル中のラップ済みエラー（例: Spotify auth 失敗）もスキップせず即時停止")
+    func wrappedErrorDuringCancellationStopsImmediately() async {
+        // Infra 層は URLSession の取消をドメインエラーにラップすることがある。
+        // タスクがキャンセル済みなら、それをセグメント失敗と誤判定してはならない。
+        struct SelfCancellingRunner: CornerRunning {
+            func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw SpotifyError.authFailed("request cancelled")
+            }
+        }
+        let sequencer = SpyThemeSequencer()
+        let spotify = FakeSpotifyController()
+        let recorder = EventRecorder()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: sequencer,
+            cornerRunner: SelfCancellingRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            spotify: spotify,
+            onEvent: { recorder.append($0) }
+        )
+        await #expect(throws: CancellationError.self) {
+            try await engine.run(program: program, corners: [freeTalk], djs: djs)
+        }
+        // talk の後の news / ending には進まない（OP の 1 回のみ）。
+        #expect(sequencer.runs.count == 1)
+        #expect(!recorder.events.contains { event in
+            if case .segmentFailed = event { return true } else { return false }
+        })
+        #expect(spotify.events.contains(.pause))
     }
 
     @Test("未定義の corner_id は fail-fast（音を出す前に設定エラー）")

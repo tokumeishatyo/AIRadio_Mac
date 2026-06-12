@@ -7,11 +7,18 @@ public struct WebApiSpotifyController: SpotifyController {
     private let auth: any SpotifyTokenProvider
     private let http: any HTTPClient
     private let retryDelaySeconds: Double
+    private let preferredDeviceName: String?
 
-    public init(auth: any SpotifyTokenProvider, http: any HTTPClient, retryDelaySeconds: Double = 1.0) {
+    public init(
+        auth: any SpotifyTokenProvider,
+        http: any HTTPClient,
+        retryDelaySeconds: Double = 1.0,
+        preferredDeviceName: String? = nil
+    ) {
         self.auth = auth
         self.http = http
         self.retryDelaySeconds = retryDelaySeconds
+        self.preferredDeviceName = preferredDeviceName
     }
 
     public func play(uri: String) async throws {
@@ -127,6 +134,11 @@ public struct WebApiSpotifyController: SpotifyController {
         )
     }
 
+    /// 再生先デバイスの選択。**この Mac の Spotify 以外に勝手に飛ばさない**:
+    /// - `preferredDeviceName` 指定時: 名前一致のみ（なければ noDevice）。
+    /// - 未指定時: type=Computer のデバイス（アクティブ優先）。Computer がなければ noDevice。
+    ///   （`devices.first` への安易なフォールバックは、スマホ等へ Spotify Connect 転送して
+    ///    別の場所で鳴らす事故になるため行わない。）
     private func activeDeviceId(token: String) async throws -> String {
         do {
             let data = try await http.get(
@@ -135,11 +147,19 @@ public struct WebApiSpotifyController: SpotifyController {
             )
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
-            let response = try decoder.decode(DevicesResponse.self, from: data)
-            if let active = response.devices.first(where: { $0.isActive }) ?? response.devices.first {
-                return active.id
+            let devices = try decoder.decode(DevicesResponse.self, from: data).devices
+
+            if let name = preferredDeviceName {
+                guard let device = devices.first(where: { $0.name == name }) else {
+                    throw SpotifyError.noDevice
+                }
+                return device.id
             }
-            throw SpotifyError.noDevice
+            let computers = devices.filter { $0.type == "Computer" }
+            guard let device = computers.first(where: { $0.isActive }) ?? computers.first else {
+                throw SpotifyError.noDevice
+            }
+            return device.id
         } catch let error as SpotifyError {
             throw error
         } catch {
@@ -154,6 +174,8 @@ public struct WebApiSpotifyController: SpotifyController {
         struct Device: Decodable {
             let id: String
             let isActive: Bool
+            let type: String?
+            let name: String?
         }
     }
     private struct PlaybackResponse: Decodable {

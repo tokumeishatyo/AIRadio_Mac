@@ -4,7 +4,8 @@ import AIRadioCore
 @testable import AIRadioInfra
 
 struct WebApiSpotifyControllerTests {
-    private static let devicesJSON = Data(#"{"devices":[{"id":"DEV","is_active":true}]}"#.utf8)
+    private static let devicesJSON = Data(
+        #"{"devices":[{"id":"DEV","is_active":true,"type":"Computer","name":"My Mac"}]}"#.utf8)
     private static let playbackJSON = Data(#"""
     {"is_playing":true,"progress_ms":12500,"item":{"uri":"spotify:track:abc","duration_ms":210000}}
     """#.utf8)
@@ -33,6 +34,64 @@ struct WebApiSpotifyControllerTests {
         let (controller, _) = makeController { url in
             url.absoluteString.contains("/devices") ? Data(#"{"devices":[]}"#.utf8) : Data()
         }
+        await #expect(throws: SpotifyError.noDevice) {
+            try await controller.play(uri: "spotify:track:abc")
+        }
+    }
+
+    // スマホがアクティブでも、この Mac（Computer）を選ぶ。Connect 転送で別の場所で鳴らさない。
+    @Test func playPrefersComputerOverActivePhone() async throws {
+        let json = Data(#"""
+        {"devices":[
+          {"id":"PHONE","is_active":true,"type":"Smartphone","name":"iPhone"},
+          {"id":"MAC","is_active":false,"type":"Computer","name":"My Mac"}
+        ]}
+        """#.utf8)
+        let (controller, fake) = makeController { url in
+            url.absoluteString.contains("/devices") ? json : Data()
+        }
+        try await controller.play(uri: "spotify:track:abc")
+        let playReq = fake.requests.first { $0.url.absoluteString.contains("/v1/me/player/play") }
+        #expect(playReq?.url.query?.contains("device_id=MAC") == true)
+    }
+
+    @Test func playWithoutComputerDeviceThrowsNoDevice() async {
+        let json = Data(#"{"devices":[{"id":"PHONE","is_active":true,"type":"Smartphone","name":"iPhone"}]}"#.utf8)
+        let (controller, _) = makeController { url in
+            url.absoluteString.contains("/devices") ? json : Data()
+        }
+        await #expect(throws: SpotifyError.noDevice) {
+            try await controller.play(uri: "spotify:track:abc")
+        }
+    }
+
+    @Test func playHonorsPreferredDeviceName() async throws {
+        let json = Data(#"""
+        {"devices":[
+          {"id":"MAC1","is_active":true,"type":"Computer","name":"Mac mini"},
+          {"id":"MAC2","is_active":false,"type":"Computer","name":"Mac Studio"}
+        ]}
+        """#.utf8)
+        let fake = FakeHTTPClient { url in
+            url.absoluteString.contains("/devices") ? json : Data()
+        }
+        let controller = WebApiSpotifyController(
+            auth: FakeTokenProvider(token: "TOK"), http: fake,
+            retryDelaySeconds: 0, preferredDeviceName: "Mac Studio"
+        )
+        try await controller.play(uri: "spotify:track:abc")
+        let playReq = fake.requests.first { $0.url.absoluteString.contains("/v1/me/player/play") }
+        #expect(playReq?.url.query?.contains("device_id=MAC2") == true)
+    }
+
+    @Test func playWithMissingPreferredDeviceThrowsNoDevice() async {
+        let fake = FakeHTTPClient { url in
+            url.absoluteString.contains("/devices") ? Self.devicesJSON : Data()
+        }
+        let controller = WebApiSpotifyController(
+            auth: FakeTokenProvider(token: "TOK"), http: fake,
+            retryDelaySeconds: 0, preferredDeviceName: "ない子"
+        )
         await #expect(throws: SpotifyError.noDevice) {
             try await controller.play(uri: "spotify:track:abc")
         }

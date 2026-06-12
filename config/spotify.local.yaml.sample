@@ -12,3 +12,6 @@ spotify:
   client_id: "YOUR_CLIENT_ID"
   redirect_uri: "http://127.0.0.1:5543/callback"
   market: "JP"
+  # 再生先デバイス（Spotify Connect の表示名）。省略時はこの Mac（type=Computer）を自動選択。
+  # スマホ等へ勝手に Connect 転送しないため、Computer デバイスが見つからない場合はエラーで止まる。
+  # device_name: "My Mac Studio"

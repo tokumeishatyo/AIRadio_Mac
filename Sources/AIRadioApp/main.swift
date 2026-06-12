@@ -8,6 +8,7 @@ import AIRadioInfra
 //   AIRADIO_DEMO=spotify       Spotify 検索 + Web API 再生
 //   AIRADIO_DEMO=theme         統一テーマエンジン（OP / ニュース / ED）
 //   AIRADIO_DEMO=corner        会話コーナー（LLM 台本 → DJ 二人の会話 → 一曲）
+//   AIRADIO_DEMO=broadcast     番組 1 周（OP → トーク → ニュース天気 → ED、Ctrl-C で停止）
 
 private let spotifyScopes = ["user-read-playback-state", "user-modify-playback-state"]
 
@@ -195,11 +196,102 @@ func runCornerDemo() async {
     }
 }
 
+func runBroadcastDemo() async {
+    print("ケイラボAIラジオ Mac版 — 放送デモ（番組 1 周、Ctrl-C で停止）")
+    do {
+        let program = try ProgramConfigLoader.load(path: "config/program.yaml")
+        let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
+        let research = try ResearchConfigLoader.load(path: "config/research.yaml")
+        let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
+        let djs = try DjsConfigLoader.load(path: "config/djs.yaml")
+        let corners = try CornersConfigLoader.load(path: "config/corners.yaml")
+        let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
+        let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+
+        let http = URLSessionHTTPClient()
+        let auth = try makeSpotifyAuth()
+        let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http)
+        let audio = AVAudioPlayerBackend()
+        let spotify = WebApiSpotifyController(auth: auth, http: http)
+        let clock = SystemClock()
+
+        let cornerEngine = CornerEngine(
+            llm: GeminiLLMBackend(config: llmConfig, http: http),
+            tts: tts,
+            audio: audio,
+            searcher: SpotifyWebSearcher(auth: auth, market: spotifyConfig.market, http: http),
+            spotify: spotify,
+            clock: clock,
+            temperature: llmConfig.temperature,
+            onEvent: { event in
+                switch event {
+                case .songPicked(let track):
+                    print("  締めの曲: \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
+                case .scriptReady(let lineCount, let totalCharacters):
+                    print("  台本: \(lineCount) 行 / \(totalCharacters) 文字")
+                case .line(let line):
+                    print("    \(line.djId): \(line.text)")
+                case .songStarted:
+                    print("  ♪ 再生中…")
+                }
+            }
+        )
+        let newsProvider = NewsWeatherProvider(
+            news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
+            weather: JmaWeatherSource(areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http),
+            template: research.announcementTemplate
+        )
+        let engine = BroadcastEngine(
+            themes: BroadcastThemes(
+                opening: ThemedAnnouncement(theme: themes.opening.theme, announcement: themes.opening.announcement),
+                news: themes.news.theme,
+                ending: ThemedAnnouncement(theme: themes.ending.theme, announcement: themes.ending.announcement)
+            ),
+            themeSequencer: ThemeSequencer(tts: tts, audio: audio, spotify: spotify, clock: clock),
+            cornerRunner: cornerEngine,
+            newsProvider: newsProvider,
+            spotify: spotify,
+            onEvent: { event in
+                switch event {
+                case .segmentStarted(let index, let kind):
+                    print("=== [\(index + 1)] \(kind.rawValue) ===")
+                case .segmentFinished(let index, let kind):
+                    print("=== [\(index + 1)] \(kind.rawValue) 完了 ===")
+                case .segmentFailed(let index, let kind, let code):
+                    let error = BroadcastError.segmentFailed(code)
+                    print("=== [\(index + 1)] \(kind.rawValue) エラー[\(error.code)]: \(error.message) ===")
+                case .broadcastFinished:
+                    print("=== 放送終了 ===")
+                }
+            }
+        )
+        print("番組「\(program.title)」を開始します（全 \(program.segments.count) セグメント）")
+        try await engine.run(program: program, corners: corners, djs: djs)
+    } catch is CancellationError {
+        print("停止しました（完全静寂）")
+    } catch let error as RadioError {
+        print("エラー[\(error.code)]: \(error.message)")
+    } catch {
+        print("エラー: \(error)")
+    }
+}
+
 switch ProcessInfo.processInfo.environment["AIRADIO_DEMO"] ?? "tts" {
 case "spotify-auth": await runSpotifyAuthDemo()
 case "spotify": await runSpotifyDemo()
 case "theme": await runThemeDemo()
 case "news": await runNewsDemo()
 case "corner": await runCornerDemo()
+case "broadcast":
+    // 放送全体を 1 つの Task で回し、Ctrl-C（SIGINT）で Task.cancel()（CLAUDE.md §3-1）。
+    let broadcastTask = Task { await runBroadcastDemo() }
+    signal(SIGINT, SIG_IGN)
+    let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+    sigint.setEventHandler {
+        print("\n停止します…（後始末中）")
+        broadcastTask.cancel()
+    }
+    sigint.resume()
+    await broadcastTask.value
 default: await runTtsDemo()
 }

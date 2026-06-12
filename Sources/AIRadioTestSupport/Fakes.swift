@@ -51,6 +51,49 @@ public final class ScriptedLLM: LLMBackend, @unchecked Sendable {
     }
 }
 
+/// テーマ演出の実行を記録する ThemeSequencing（演出はしない）。
+public final class SpyThemeSequencer: ThemeSequencing, @unchecked Sendable {
+    public struct Run: Sendable, Equatable {
+        public let trackUri: String
+        public let announcement: String
+        public let speakerId: Int
+        public init(trackUri: String, announcement: String, speakerId: Int) {
+            self.trackUri = trackUri
+            self.announcement = announcement
+            self.speakerId = speakerId
+        }
+    }
+    private let lock = NSLock()
+    private var _runs: [Run] = []
+    public init() {}
+    public var runs: [Run] { lock.withLock { _runs } }
+    public func run(theme: ThemeConfig, announcement: String, speakerId: Int) async throws {
+        lock.withLock {
+            _runs.append(Run(trackUri: theme.trackUri, announcement: announcement, speakerId: speakerId))
+        }
+    }
+}
+
+/// コーナー実行を記録する CornerRunning。コーナー id ごとにエラーを注入できる。
+public final class FakeCornerRunner: CornerRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _ranCornerIds: [String] = []
+    private let errors: [String: any Error & Sendable]
+    public init(errors: [String: any Error & Sendable] = [:]) { self.errors = errors }
+    public var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
+    public func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+        lock.withLock { _ranCornerIds.append(corner.id) }
+        if let error = errors[corner.id] { throw error }
+    }
+}
+
+/// 固定原稿を返す AnnouncementProviding。
+public struct FakeAnnouncementProvider: AnnouncementProviding {
+    public let script: String
+    public init(script: String) { self.script = script }
+    public func announcement() async -> String { script }
+}
+
 /// 再生された WAV を記録する AudioPlayer。
 public final class SpyAudioPlayer: AudioPlayer, @unchecked Sendable {
     private let lock = NSLock()

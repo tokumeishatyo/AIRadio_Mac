@@ -1,0 +1,12 @@
+# 番組フォーマット。segments を上から順に実行する（順序の入替え・追加は設定のみで可能）。
+# type: opening / talk / news / ending（talk は corners.yaml の corner_id 必須）
+# anchor_dj_id: opening / news / ending の読み上げ担当（djs.yaml の id）
+program:
+  title: "ケイラボAIラジオ"
+  anchor_dj_id: zundamon
+  segments:
+    - type: opening
+    - type: talk
+      corner_id: free_talk
+    - type: news
+    - type: ending

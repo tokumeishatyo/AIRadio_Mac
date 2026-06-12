@@ -2,7 +2,7 @@ import Foundation
 import AIRadioCore
 
 /// ニュースと天気を取得し、テンプレートに展開してニュース原稿を生成する（fail-tolerant）。
-public struct NewsWeatherProvider {
+public struct NewsWeatherProvider: AnnouncementProviding {
     private let news: any ResearchSource
     private let weather: any ResearchSource
     private let template: String

@@ -22,3 +22,4 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-LLM-API-FAILED-001` | LLM | generateContent が非 2xx / 通信失敗 | S6 |
 | `E-LLM-EMPTY-RESPONSE-001` | LLM | LLM 応答にテキストがない | S6 |
 | `E-LLM-SCRIPT-PARSE-FAILED-001` | LLM | LLM 応答が台本として解釈できない（4 行未満） | S6 |
+| `E-RTM-SEGMENT-FAILED-001` | RTM | 放送セグメントが実行時エラーで中断（スキップして継続） | S7 |

@@ -37,6 +37,16 @@ public protocol ResearchSource: Sendable {
     func fetch() async throws -> String
 }
 
+/// 会話コーナー 1 本の実行（`CornerEngine` が準拠。テストで fake 差し替え）。
+public protocol CornerRunning: Sendable {
+    func run(corner: CornerTemplate, djs: [DjProfile]) async throws
+}
+
+/// 読み上げ原稿の生成（`NewsWeatherProvider` が準拠。fail-tolerant 前提で throw しない）。
+public protocol AnnouncementProviding: Sendable {
+    func announcement() async -> String
+}
+
 /// 時刻と待機の抽象（テストで差し替え可能にする）。
 public protocol Clock: Sendable {
     var now: Date { get }

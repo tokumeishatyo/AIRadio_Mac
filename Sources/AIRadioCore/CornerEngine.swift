@@ -14,7 +14,7 @@ public enum CornerEvent: Sendable, Equatable {
 /// 3. 発話（1 行ずつ、その DJ の声で合成 → 再生。次行は再生中に先行合成）
 /// 4. 一曲（`play_seconds` 秒、0 なら曲の長さぶん）
 /// 5. 後始末（正常・例外・キャンセルいずれも最後は必ず pause、CLAUDE.md §3-1）
-public struct CornerEngine: Sendable {
+public struct CornerEngine: CornerRunning, Sendable {
     private let llm: any LLMBackend
     private let tts: any TTSBackend
     private let audio: any AudioPlayer

@@ -134,6 +134,24 @@ public enum LLMError: RadioError, Equatable {
     }
 }
 
+/// 放送進行（番組エンジン）に関するエラー。セグメント失敗はスキップして放送継続（fail-tolerant）。
+public enum BroadcastError: RadioError, Equatable {
+    case segmentFailed(String)
+
+    public var code: String {
+        switch self {
+        case .segmentFailed: return "E-RTM-SEGMENT-FAILED-001"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .segmentFailed(let detail):
+            return "セグメントの実行に失敗したためスキップしました（原因: \(detail)）"
+        }
+    }
+}
+
 /// 音声再生に関するエラー。
 public enum AudioError: RadioError, Equatable {
     case playbackFailed

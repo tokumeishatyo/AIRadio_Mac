@@ -66,10 +66,16 @@ func makeBroadcastStack(
         temperature: llmConfig.temperature,
         onEvent: onCornerEvent
     )
-    let newsProvider = NewsWeatherProvider(
+    // ニュース原稿は LLM アナウンサー原稿（S11）。読み手（news の dj_id、なければ anchor）のペルソナを使う。
+    let newsDjId = program.segments.first { $0.kind == .news }?.djId ?? program.anchorDjId
+    let newsPersona = djs.first { $0.id == newsDjId }?.persona ?? ""
+    let newsProvider = LlmNewsScriptProvider(
         news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
         weather: JmaWeatherSource(areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http),
-        template: research.announcementTemplate
+        llm: GeminiLLMBackend(config: llmConfig, http: http),
+        persona: newsPersona,
+        style: research.llmScript,
+        fallbackTemplate: research.announcementTemplate
     )
     let engine = BroadcastEngine(
         themes: BroadcastThemes(

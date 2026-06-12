@@ -396,6 +396,32 @@ struct BroadcastEngineTests {
         #expect(endPolls.count <= 3)
     }
 
+    @Test("news の原稿生成は先行準備の 1 回だけ（セグメント到達時に再生成しない）")
+    func newsScriptIsPreparedOnce() async throws {
+        final class CountingProvider: AnnouncementProviding, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _calls = 0
+            var calls: Int { lock.withLock { _calls } }
+            func announcement() async -> String {
+                lock.withLock { _calls += 1 }
+                return "原稿"
+            }
+        }
+        let provider = CountingProvider()
+        let sequencer = SpyThemeSequencer()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: sequencer,
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: provider,
+            spotify: FakeSpotifyController(),
+            clock: FakeClock()
+        )
+        try await engine.run(program: program, corners: [freeTalk], djs: djs)
+        #expect(provider.calls == 1)
+        #expect(sequencer.runs[1].announcement == "原稿")
+    }
+
     @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")
     func talkUsesPreparedContent() async throws {
         let fixture = Fixture()

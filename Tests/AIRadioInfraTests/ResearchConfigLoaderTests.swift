@@ -38,4 +38,29 @@ struct ResearchConfigLoaderTests {
             try ResearchConfigLoader.load(yaml: "news:\n  max_items: 3")
         }
     }
+
+    @Test func loadsLlmScriptSection() throws {
+        let yaml = """
+        weather:
+          area_code: "130000"
+        llm_script:
+          style_hint: "簡潔に"
+          target_minutes: 3
+          chars_per_minute: 300
+          intro: "ニュースです。"
+          outro: "おしまい。"
+        """
+        let style = try ResearchConfigLoader.load(yaml: yaml).llmScript
+        #expect(style == NewsScriptStyle(
+            styleHint: "簡潔に", targetMinutes: 3, charsPerMinute: 300,
+            intro: "ニュースです。", outro: "おしまい。"))
+        #expect(style.targetCharacters == 900)
+    }
+
+    @Test func llmScriptDefaultsWhenOmitted() throws {
+        let style = try ResearchConfigLoader.load(yaml: "weather:\n  area_code: \"130000\"\n").llmScript
+        #expect(style == NewsScriptStyle())
+        #expect(style.intro.contains("{hour12}"))
+        #expect(style.targetCharacters == 640)
+    }
 }

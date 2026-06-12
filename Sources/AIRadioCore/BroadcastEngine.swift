@@ -77,15 +77,19 @@ public struct BroadcastEngine: Sendable {
                 return (segment, corner, speaker.speakerId)
             }
 
-        // 先行準備（S10）: 全 song の選曲・全 talk の準備を並行起動（まだ音は出ない）。
+        // 先行準備（S10/S11）: 全 song の選曲・全 talk の準備・全 news の原稿生成を並行起動（まだ音は出ない）。
         var cornerPreparations: [Int: Task<PreparedCorner, any Error>] = [:]
         var songPicks: [Int: Task<TrackInfo, Never>] = [:]
+        var newsScripts: [Int: Task<String, Never>] = [:]
         for (index, entry) in resolved.enumerated() {
             switch entry.segment.kind {
             case .talk:
                 let runner = cornerRunner
                 let corner = entry.corner!
                 cornerPreparations[index] = Task { try await runner.prepare(corner: corner, djs: djs) }
+            case .news:
+                let provider = newsProvider
+                newsScripts[index] = Task { await provider.announcement() }
             case .song:
                 let picker = songPicker
                 let spec = entry.segment.song!
@@ -103,9 +107,10 @@ public struct BroadcastEngine: Sendable {
                 break
             }
         }
-        let cancelPreparations: @Sendable () -> Void = { [cornerPreparations, songPicks] in
+        let cancelPreparations: @Sendable () -> Void = { [cornerPreparations, songPicks, newsScripts] in
             cornerPreparations.values.forEach { $0.cancel() }
             songPicks.values.forEach { $0.cancel() }
+            newsScripts.values.forEach { $0.cancel() }
         }
 
         // 準備 Task はエンジンのキャンセルを継承しない（非構造化）ため、停止時に明示キャンセルする。
@@ -134,7 +139,8 @@ public struct BroadcastEngine: Sendable {
                             djs: djs,
                             extraValues: extraValues,
                             cornerPreparations: cornerPreparations,
-                            songPicks: songPicks
+                            songPicks: songPicks,
+                            newsScripts: newsScripts
                         )
                         onEvent?(.segmentFinished(index: index, kind: entry.segment.kind))
                     } catch {
@@ -176,7 +182,8 @@ public struct BroadcastEngine: Sendable {
         djs: [DjProfile],
         extraValues: [String: String],
         cornerPreparations: [Int: Task<PreparedCorner, any Error>],
-        songPicks: [Int: Task<TrackInfo, Never>]
+        songPicks: [Int: Task<TrackInfo, Never>],
+        newsScripts: [Int: Task<String, Never>]
     ) async throws {
         switch entry.segment.kind {
         case .opening:
@@ -204,8 +211,8 @@ public struct BroadcastEngine: Sendable {
             let prepared = try await cornerPreparations[index]!.value
             try await cornerRunner.run(prepared: prepared, djs: djs)
         case .news:
-            // Provider が {news}/{weather} を展開した原稿に、発話直前の時刻を二段展開する。
-            let script = await newsProvider.announcement()
+            // 原稿は先行準備済み（素材取得 + LLM 生成、S11）。発話直前の時刻を二段展開する。
+            let script = await newsScripts[index]!.value
             try await themeSequencer.run(
                 theme: themes.news,
                 announcement: expand(script, extra: extraValues),

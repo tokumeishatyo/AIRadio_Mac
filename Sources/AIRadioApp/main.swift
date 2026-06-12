@@ -120,16 +120,31 @@ func runThemeDemo() async {
 }
 
 func runNewsDemo() async {
-    print("ケイラボAIラジオ Mac版 — ニュース・天気 取得デモ（音声なし）")
+    print("ケイラボAIラジオ Mac版 — ニュース原稿デモ（LLM アナウンサー原稿、音声なし）")
     do {
         let research = try ResearchConfigLoader.load(path: "config/research.yaml")
         let http = URLSessionHTTPClient()
-        let newsWeather = NewsWeatherProvider(
-            news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
-            weather: JmaWeatherSource(areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http),
-            template: research.announcementTemplate
-        )
-        let announcement = await newsWeather.announcement()
+        let news = NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http)
+        let weather = JmaWeatherSource(
+            areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http)
+
+        let provider: any AnnouncementProviding
+        if let llmConfig = try? LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml") {
+            let djs = (try? DjsConfigLoader.load(path: "config/djs.yaml")) ?? []
+            provider = LlmNewsScriptProvider(
+                news: news,
+                weather: weather,
+                llm: GeminiLLMBackend(config: llmConfig, http: http),
+                persona: djs.first { $0.id == "ryusei" }?.persona ?? "",
+                style: research.llmScript,
+                fallbackTemplate: research.announcementTemplate
+            )
+        } else {
+            print("（LLM キー未設定のため定型テンプレ原稿で表示します）")
+            provider = NewsWeatherProvider(
+                news: news, weather: weather, template: research.announcementTemplate)
+        }
+        let announcement = await provider.announcement()
         print("--- ニュース原稿 ---")
         print(announcement)
     } catch let error as RadioError {

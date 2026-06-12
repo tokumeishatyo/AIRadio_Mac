@@ -109,7 +109,8 @@ public struct CornerEngine: CornerRunning, Sendable {
         if prepared.corner.playSeconds > 0 {
             playSeconds = Double(prepared.corner.playSeconds)
         } else {
-            playSeconds = try await spotify.currentTrackDurationSeconds()
+            // URI 切替確認つきの残り秒数（切替直後に前の曲の長さを読むと早切りする、S10 fix）。
+            playSeconds = try await spotify.remainingSeconds(of: prepared.song.uri, clock: clock)
         }
         try await clock.sleep(seconds: playSeconds)
     }

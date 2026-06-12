@@ -196,7 +196,8 @@ public struct BroadcastEngine: Sendable {
             if spec.playSeconds > 0 {
                 playSeconds = Double(spec.playSeconds)
             } else {
-                playSeconds = try await spotify.currentTrackDurationSeconds()
+                // URI 切替確認つきの残り秒数（切替直後に前の曲の長さを読むと早切りする）。
+                playSeconds = try await spotify.remainingSeconds(of: track.uri, clock: clock)
             }
             try await clock.sleep(seconds: playSeconds)
             try await spotify.pause()

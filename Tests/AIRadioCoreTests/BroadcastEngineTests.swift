@@ -298,6 +298,58 @@ struct BroadcastEngineTests {
         #expect(spotify.events.contains(.play("spotify:track:FALLBACK")))
     }
 
+    @Test("song フル再生: 切替直後のメタデータ遅延でも前の曲の長さで早切りしない")
+    func songFullPlaybackWaitsForMetadataSwitch() async throws {
+        // 最初の 2 回は前の曲（OP テーマ、30 秒）のメタデータを返し、3 回目から新曲（240 秒）。
+        final class LaggySpotify: SpotifyController, @unchecked Sendable {
+            private let lock = NSLock()
+            private var stateQueries = 0
+            private var switched = false
+            func play(uri: String) async throws {}
+            func pause() async throws {}
+            func setVolume(_ percent: Int) async throws {}
+            func seek(toSeconds seconds: Int) async throws {}
+            func playerState() async throws -> PlayerState {
+                lock.withLock {
+                    stateQueries += 1
+                    if stateQueries >= 3 { switched = true }
+                    return PlayerState(
+                        state: .playing,
+                        trackUri: switched ? "spotify:track:FIRST" : "spotify:track:OP-THEME",
+                        positionSeconds: 0
+                    )
+                }
+            }
+            func currentTrackDurationSeconds() async throws -> Double {
+                lock.withLock { switched ? 240 : 30 }
+            }
+        }
+        final class SleepRecorder: Clock, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _sleeps: [Double] = []
+            let now = Date(timeIntervalSince1970: 0)
+            var sleeps: [Double] { lock.withLock { _sleeps } }
+            func sleep(seconds: Double) async throws { lock.withLock { _sleeps.append(seconds) } }
+        }
+        let clock = SleepRecorder()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: SpyThemeSequencer(),
+            cornerRunner: FakeCornerRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            songPicker: FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "T", artist: "A")),
+            spotify: LaggySpotify(),
+            clock: clock
+        )
+        let songProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
+            ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F", playSeconds: 0)),
+        ])
+        try await engine.run(program: songProgram, corners: [], djs: djs)
+        // ポーリング（0.2s × 2）の後、新曲の長さ 240 秒で待つ（30 秒で早切りしない）。
+        #expect(clock.sleeps.last == 240)
+        #expect(!clock.sleeps.contains(30))
+    }
+
     @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")
     func talkUsesPreparedContent() async throws {
         let fixture = Fixture()

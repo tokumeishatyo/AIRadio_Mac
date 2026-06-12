@@ -53,6 +53,33 @@ extension SpotifyController {
     }
 }
 
+extension SpotifyController {
+    /// 指定 URI の「残り再生秒数」（曲長 − 現在位置）。
+    /// 再生切替の直後は `/me/player` のメタデータが**前の曲のまま**返ることがあるため、
+    /// URI の切替を確認してから曲長を読む（読み違えると前の曲の長さだけ待って早切りする、S10 fix）。
+    public func remainingSeconds(
+        of uri: String,
+        clock: any Clock,
+        pollIntervalSeconds: Double = 0.2,
+        maxAttempts: Int = 15
+    ) async throws -> Double {
+        for attempt in 0..<maxAttempts {
+            let state = try await playerState()
+            if state.trackUri == uri {
+                let duration = try await currentTrackDurationSeconds()
+                if duration > 0 {
+                    return max(duration - state.positionSeconds, 0)
+                }
+            }
+            if attempt < maxAttempts - 1 {
+                try await clock.sleep(seconds: pollIntervalSeconds)
+            }
+        }
+        // 切替を確認できなかった場合のフォールバック（曲長 0 なら待たずに次へ進む）。
+        return try await currentTrackDurationSeconds()
+    }
+}
+
 /// 会話コーナーの準備（LLM 処理、無音）と本番（発話 + 曲）。`CornerEngine` が準拠。
 /// 分離により、先行準備（S10）で放送中のデッドエアを避けられる。
 public protocol CornerRunning: Sendable {

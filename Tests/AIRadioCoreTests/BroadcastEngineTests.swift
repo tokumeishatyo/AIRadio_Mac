@@ -345,10 +345,10 @@ struct BroadcastEngineTests {
             ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F", playSeconds: 0)),
         ])
         try await engine.run(program: songProgram, corners: [], djs: djs)
-        // ポーリング（0.2s × 2）の後、新曲の残り 240 - margin(5) = 235 秒で待つ（30 秒側で早切りしない）。
-        #expect(clock.sleeps.contains(235))
-        #expect(!clock.sleeps.contains(30))
-        #expect(!clock.sleeps.contains(25))
+        // ポーリング（0.2s × 2）の後、新曲の曲長（240 秒）基準で待つ（前の曲の 30 秒側で早切りしない）。
+        let napped = clock.sleeps.filter { $0 > 1 }.reduce(0, +)
+        #expect(napped >= 235)
+        #expect(!clock.sleeps.contains(25))   // 前の曲（30 秒）基準のまとめ寝をしない
     }
 
     @Test("曲終了後も is_playing=true が返り続けても、位置の停滞で即座に次へ進む")

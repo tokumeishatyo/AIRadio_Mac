@@ -2,6 +2,7 @@ import Foundation
 
 /// テーマ + DJ ペルソナ + 確定済みの締め曲から会話台本を LLM 生成する。
 /// 出力契約: 1 行 = `DJ名: セリフ`。登録 DJ 名で始まらない行は無視（マークダウン混入対策）。
+/// S12: テーマは引数（プールから選択済みの値）、日付・季節コンテキストを注入、お便り読み上げ形式に対応。
 public struct DialogueScriptGenerator: Sendable {
     private let llm: any LLMBackend
     private let temperature: Double
@@ -14,9 +15,16 @@ public struct DialogueScriptGenerator: Sendable {
     public func generate(
         corner: CornerTemplate,
         djs: [DjProfile],
-        song: TrackInfo
+        song: TrackInfo,
+        theme: String? = nil,
+        dateContext: String = "",
+        letter: ListenerLetter? = nil
     ) async throws -> DialogueScript {
-        let request = Self.makeRequest(corner: corner, djs: djs, song: song, temperature: temperature)
+        let request = Self.makeRequest(
+            corner: corner, djs: djs, song: song,
+            theme: theme, dateContext: dateContext, letter: letter,
+            temperature: temperature
+        )
         let raw = try await llm.generate(request)
         return try Self.parse(raw, djs: djs)
     }
@@ -27,34 +35,66 @@ public struct DialogueScriptGenerator: Sendable {
         corner: CornerTemplate,
         djs: [DjProfile],
         song: TrackInfo,
+        theme: String? = nil,
+        dateContext: String = "",
+        letter: ListenerLetter? = nil,
         temperature: Double = 0.9
     ) -> LLMRequest {
+        let selectedTheme = theme ?? corner.theme
         let names = djs.map(\.name).joined(separator: "」「")
         let profiles = djs
             .map { "- \($0.name): \($0.persona)" }
             .joined(separator: "\n")
 
         // フォールバック曲はタイトル不明（URI のみ）のことがある。その場合は曲名を捏造させず匿名で紹介させる。
-        let songInstruction: String
+        let songIntro: String
         if song.title.isEmpty {
-            songInstruction = "コーナーの最後は、曲名を明かさず「この後の一曲」としてテーマの余韻から自然に曲振りして締める。曲名やアーティスト名を推測して言ってはいけない。"
+            songIntro = "曲名を明かさず「この後の一曲」として曲振りして締める。曲名やアーティスト名を推測して言ってはいけない。"
         } else {
-            songInstruction = "コーナーの最後は、テーマの余韻から自然に「\(song.artist)」の「\(song.title)」を紹介して締める。"
+            songIntro = "「\(song.artist)」の「\(song.title)」を紹介して締める。"
+        }
+        let songInstruction: String
+        if let letter {
+            songInstruction = "コーナーの最後は、\(letter.radioName)さんからのリクエスト曲として、\(songIntro)"
+        } else {
+            songInstruction = "コーナーの最後は、テーマの余韻から自然に\(songIntro)"
         }
 
-        let prompt = """
-        ラジオコーナー「\(corner.title)」の会話台本を書いてください。
+        var sections = ["ラジオコーナー「\(corner.title)」の会話台本を書いてください。"]
+        if let letter {
+            sections.append("""
+            # リスナーからのお便り
+            ラジオネーム: \(letter.radioName)
+            \(letter.body)
+            """)
+        } else {
+            sections.append("""
+            # テーマ
+            \(selectedTheme)
+            """)
+        }
+        if !dateContext.isEmpty {
+            sections.append("""
+            # 今日の日付と季節
+            \(dateContext)
+            """)
+        }
 
-        # テーマ
-        \(corner.theme)
-
-        # 制約
-        - セリフの合計は \(corner.targetCharacters) 文字以上、\(corner.targetCharacters * 12 / 10) 文字以内（\(corner.targetMinutes) 分程度の会話）。短すぎる台本は不可。
-        - 出力は台本のみ。1 行につき 1 つのセリフを「DJ名: セリフ」の形式で書く。
-        - DJ名は「\(names)」のみ。ナレーション、ト書き、見出し、記号装飾は書かない。
-        - 二人が交互に、それぞれの口調を守って自然に会話する。
-        - \(songInstruction)
-        """
+        var constraints = [
+            "セリフの合計は \(corner.targetCharacters) 文字以上、\(corner.targetCharacters * 12 / 10) 文字以内（\(corner.targetMinutes) 分程度の会話）。短すぎる台本は不可。",
+            "出力は台本のみ。1 行につき 1 つのセリフを「DJ名: セリフ」の形式で書く。",
+            "DJ名は「\(names)」のみ。ナレーション、ト書き、見出し、記号装飾は書かない。",
+            "二人が交互に、それぞれの口調を守って自然に会話する。",
+        ]
+        if let letter {
+            constraints.append("最初に「ラジオネーム \(letter.radioName)さんからのお便り」と紹介し、本文をセリフとして自然に読み上げる。")
+            constraints.append("読み上げのあと、二人でお便りへの感想を話す（テーマ: \(selectedTheme)。脱線してよい）。")
+        }
+        if !dateContext.isEmpty {
+            constraints.append("季節や時候の話は、上の日付・季節に合わせる。")
+        }
+        constraints.append(songInstruction)
+        sections.append("# 制約\n" + constraints.map { "- \($0)" }.joined(separator: "\n"))
 
         let system = """
         あなたはラジオ番組「ケイラボAIラジオ」の放送作家です。
@@ -64,7 +104,7 @@ public struct DialogueScriptGenerator: Sendable {
         \(profiles)
         """
 
-        return LLMRequest(prompt: prompt, system: system, temperature: temperature)
+        return LLMRequest(prompt: sections.joined(separator: "\n\n"), system: system, temperature: temperature)
     }
 
     // MARK: - パース

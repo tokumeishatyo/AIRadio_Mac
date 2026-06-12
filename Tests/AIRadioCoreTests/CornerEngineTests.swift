@@ -51,14 +51,17 @@ private struct Fixture {
     init(
         responses: [String] = [candidatesResponse, scriptResponse],
         searchResults: [TrackInfo] = [TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")],
-        durationSeconds: Double = 240
+        durationSeconds: Double = 240,
+        randomIndex: @escaping @Sendable (Int) -> Int = { _ in 0 }
     ) {
         llm = ScriptedLLM(responses: responses)
         searcher = FakeTrackSearcher(results: searchResults)
         spotify = FakeSpotifyController(durationSeconds: durationSeconds)
         engine = CornerEngine(
             llm: llm, tts: tts, audio: audio, searcher: searcher,
-            spotify: spotify, clock: clock
+            spotify: spotify, clock: clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            randomIndex: randomIndex
         )
     }
 }
@@ -84,13 +87,22 @@ struct CornerEngineTests {
         #expect(fixture.clock.sleeps == [60])
     }
 
-    @Test("play_seconds=0 は残り 5 秒まで待ち、終端は実停止をポーリング（フル再生）")
+    @Test("play_seconds=0 はチャンク寝 + 位置読み直しで曲の終端まで見届ける（フル再生）")
     func fullPlaybackWaitsThenPollsForTrackEnd() async throws {
-        let fixture = Fixture(durationSeconds: 240)
-        try await fixture.engine.run(corner: corner(playSeconds: 0), djs: djs)
-        // 240 - margin(5) = 235 秒のまとめ待ち → 以降は 0.5 秒間隔のポーリング。
-        #expect(fixture.clock.sleeps.first == 235)
-        #expect(fixture.clock.sleeps.dropFirst().allSatisfy { $0 == 0.5 })
+        let simulator = PlaybackSimulator(durations: ["spotify:track:OK": 240])
+        let llm = ScriptedLLM(responses: [candidatesResponse, scriptResponse])
+        let searcher = FakeTrackSearcher(
+            results: [TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")])
+        let engine = CornerEngine(
+            llm: llm, tts: InMemoryTTS(), audio: SpyAudioPlayer(), searcher: searcher,
+            spotify: simulator, clock: simulator,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!, randomIndex: { _ in 0 }
+        )
+        try await engine.run(corner: corner(playSeconds: 0), djs: djs)
+        // まとめ寝は recheck（30 秒）単位 → 終端 5 秒手前から 0.5 秒ポーリングで実終端を検知 → pause。
+        #expect(simulator.sleeps.allSatisfy { $0 <= 30 })
+        #expect(simulator.currentPositionSeconds >= 239)
+        #expect(simulator.events.last == .pause)
     }
 
     @Test("台本生成失敗は準備段階（無音）のエラー: 音は出ておらず pause 不要")
@@ -138,7 +150,7 @@ struct CornerEngineTests {
         #expect(fixture.llm.requests[1].prompt.contains("夜に駆ける"))
     }
 
-    @Test("イベント通知の順序（選曲 → 台本 → 行 → 曲）")
+    @Test("イベント通知の順序（テーマ → 選曲 → 台本 → 行 → 曲）")
     func emitsEventsInOrder() async throws {
         let recorder = EventRecorder()
         let fixture = Fixture()
@@ -149,10 +161,106 @@ struct CornerEngineTests {
         )
         try await engine.run(corner: corner(), djs: djs)
         let events = recorder.events
-        #expect(events.count == 7)  // songPicked + scriptReady + 4 行 + songStarted
-        #expect(events.first == .songPicked(TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")))
-        #expect(events[1] == .scriptReady(lineCount: 4, totalCharacters: 40))
+        #expect(events.count == 8)  // themeSelected + songPicked + scriptReady + 4 行 + songStarted
+        #expect(events.first == .themeSelected("最近気になっていること"))
+        #expect(events[1] == .songPicked(TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")))
+        #expect(events[2] == .scriptReady(lineCount: 4, totalCharacters: 40))
         #expect(events.last == .songStarted(TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")))
+    }
+}
+
+// MARK: - S12: テーマプール + 季節コンテキスト + お便りコーナー
+
+private let letterResponse = """
+雨宿りのカエル
+梅雨の散歩で紫陽花を見つけました。雨の日も悪くないですね。
+"""
+
+private func letterCorner() -> CornerTemplate {
+    CornerTemplate(
+        id: "letter",
+        title: "お便りのコーナー",
+        theme: "最近気になっていること",
+        themePool: ["季節の楽しみ"],
+        format: .letter,
+        djIds: ["zundamon", "metan"],
+        fallbackTrackUri: "spotify:track:FALLBACK",
+        volume: 85,
+        playSeconds: 60
+    )
+}
+
+@Suite("CornerEngine: S12（テーマプール・季節・お便り）")
+struct CornerEngineS12Tests {
+    @Test("テーマプールから注入乱数で選び、選曲と台本の両方に使う")
+    func selectsThemeFromPoolDeterministically() async throws {
+        let fixture = Fixture(randomIndex: { count in
+            #expect(count == 3)
+            return 2
+        })
+        var pooled = corner(playSeconds: 60)
+        pooled.themePool = ["お酒", "旅行", "映画・ドラマ"]
+        _ = try await fixture.engine.prepare(corner: pooled, djs: djs)
+        #expect(fixture.llm.requests.count == 2)
+        #expect(fixture.llm.requests[0].prompt.contains("映画・ドラマ"))   // 選曲コンテキスト
+        #expect(fixture.llm.requests[1].prompt.contains("映画・ドラマ"))   // 台本テーマ
+        #expect(!fixture.llm.requests[1].prompt.contains("最近気になっていること"))
+    }
+
+    @Test("プールが空なら theme 固定（従来どおり）")
+    func emptyPoolFallsBackToFixedTheme() async throws {
+        let fixture = Fixture()
+        _ = try await fixture.engine.prepare(corner: corner(), djs: djs)
+        #expect(fixture.llm.requests[0].prompt.contains("最近気になっていること"))
+    }
+
+    @Test("日付・季節コンテキストを台本プロンプトに注入する（epoch = 東京 1 月 1 日）")
+    func injectsDateContextIntoScriptPrompt() async throws {
+        let fixture = Fixture()
+        _ = try await fixture.engine.prepare(corner: corner(), djs: djs)
+        #expect(fixture.llm.requests[1].prompt.contains("今日は1月1日、冬、正月明けです。"))
+        #expect(fixture.llm.requests[1].prompt.contains("季節や時候の話は、上の日付・季節に合わせる"))
+    }
+
+    @Test("letter: お便り生成 → 選曲 → 台本の 3 段 LLM 呼び出し（お便り内容が選曲コンテキストに入る）")
+    func letterPreparesInThreeStages() async throws {
+        let recorder = EventRecorder()
+        let fixture = Fixture(responses: [letterResponse, candidatesResponse, scriptResponse])
+        let engine = CornerEngine(
+            llm: fixture.llm, tts: fixture.tts, audio: fixture.audio,
+            searcher: fixture.searcher, spotify: fixture.spotify, clock: fixture.clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            randomIndex: { _ in 0 },
+            onEvent: { recorder.append($0) }
+        )
+        let prepared = try await engine.prepare(corner: letterCorner(), djs: djs)
+
+        #expect(fixture.llm.requests.count == 3)
+        // ① お便り生成（テーマ + 季節）
+        #expect(fixture.llm.requests[0].prompt.contains("お便り"))
+        #expect(fixture.llm.requests[0].prompt.contains("季節の楽しみ"))
+        #expect(fixture.llm.requests[0].prompt.contains("今日は1月1日、冬、正月明けです。"))
+        // ② 選曲（お便り内容がコンテキスト。プレフライトは従来どおり）
+        #expect(fixture.llm.requests[1].prompt.contains("リクエスト曲"))
+        #expect(fixture.llm.requests[1].prompt.contains("梅雨の散歩で紫陽花を見つけました"))
+        // ③ 台本（ラジオネーム + 本文 + リクエスト曲振り）
+        #expect(fixture.llm.requests[2].prompt.contains("雨宿りのカエル"))
+        #expect(fixture.llm.requests[2].prompt.contains("リクエスト曲"))
+
+        #expect(prepared.song.uri == "spotify:track:OK")
+        #expect(recorder.events.contains(.letterReady(radioName: "雨宿りのカエル")))
+    }
+
+    @Test("letter: お便り生成失敗（本文空）は準備段階のエラーで音は出ない")
+    func letterParseFailureIsSilent() async {
+        let fixture = Fixture(responses: ["ラジオネームだけ"])
+        var broken = letterCorner()
+        broken.themePool = []
+        await #expect(throws: LLMError.self) {
+            _ = try await fixture.engine.prepare(corner: broken, djs: djs)
+        }
+        #expect(fixture.audio.played.isEmpty)
+        #expect(fixture.spotify.events.isEmpty)
     }
 }
 

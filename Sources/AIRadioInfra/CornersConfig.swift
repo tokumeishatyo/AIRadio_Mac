@@ -9,6 +9,8 @@ public enum CornersConfigLoader {
             let id: String?
             let title: String?
             let theme: String?
+            let themes: [String]?
+            let format: String?
             let dj_ids: [String]?
             let target_minutes: Int?
             let chars_per_minute: Int?
@@ -33,10 +35,21 @@ public enum CornersConfigLoader {
             guard let fallback = corner.fallback_track_uri, !fallback.isEmpty else {
                 throw ConfigError.missingField("corners[].fallback_track_uri (\(id))")
             }
+            let format: CornerFormat
+            if let raw = corner.format {
+                guard let parsed = CornerFormat(rawValue: raw) else {
+                    throw ConfigError.missingField("corners[].format (\(id)) が不正な値: \(raw)")
+                }
+                format = parsed
+            } else {
+                format = .freeTalk
+            }
             return CornerTemplate(
                 id: id,
                 title: title,
                 theme: theme,
+                themePool: corner.themes ?? [],
+                format: format,
                 djIds: djIds,
                 targetMinutes: corner.target_minutes ?? 5,
                 charsPerMinute: corner.chars_per_minute ?? 320,

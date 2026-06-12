@@ -53,7 +53,11 @@ func makeBroadcastStack(
     let auth = try makeSpotifyAuth()
     let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http, speedScale: ttsConfig.speedScale)
     let audio = AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume))
-    let spotify = try makeSpotifyController(auth: auth, http: http)
+    // AIRADIO_SPOTIFY_LOG=1 で全 Spotify 呼び出しを経過秒付きでログ（途中切り等の診断用）。
+    var spotify: any SpotifyController = try makeSpotifyController(auth: auth, http: http)
+    if ProcessInfo.processInfo.environment["AIRADIO_SPOTIFY_LOG"] == "1" {
+        spotify = LoggingSpotifyController(inner: spotify, start: Date())
+    }
     let clock = SystemClock()
 
     let cornerEngine = CornerEngine(
@@ -102,6 +106,10 @@ func makeBroadcastStack(
 /// コーナー進行のコンソール出力（デモ・常駐どちらでも進行ログとして使う）。
 @Sendable func printCornerEvent(_ event: CornerEvent) {
     switch event {
+    case .themeSelected(let theme):
+        print("  テーマ: \(theme)")
+    case .letterReady(let radioName):
+        print("  お便り: ラジオネーム \(radioName)")
     case .songPicked(let track):
         print("  締めの曲: \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
     case .scriptReady(let lineCount, let totalCharacters):

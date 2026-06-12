@@ -2,6 +2,8 @@ import Foundation
 
 /// コーナー進行中の出来事（デモ表示・ログ用）。
 public enum CornerEvent: Sendable, Equatable {
+    case themeSelected(String)
+    case letterReady(radioName: String)
     case songPicked(TrackInfo)
     case scriptReady(lineCount: Int, totalCharacters: Int)
     case line(DialogueLine)
@@ -36,6 +38,9 @@ public struct CornerEngine: CornerRunning, Sendable {
     private let spotify: any SpotifyController
     private let clock: any Clock
     private let temperature: Double
+    private let timeZone: TimeZone
+    /// テーマプールからの選択用乱数（0..<count のインデックスを返す。テストでは決定論的に注入）。
+    private let randomIndex: @Sendable (Int) -> Int
     private let onEvent: (@Sendable (CornerEvent) -> Void)?
 
     public init(
@@ -46,6 +51,8 @@ public struct CornerEngine: CornerRunning, Sendable {
         spotify: any SpotifyController,
         clock: any Clock,
         temperature: Double = 0.9,
+        timeZone: TimeZone = .current,
+        randomIndex: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) },
         onEvent: (@Sendable (CornerEvent) -> Void)? = nil
     ) {
         self.llm = llm
@@ -55,28 +62,53 @@ public struct CornerEngine: CornerRunning, Sendable {
         self.spotify = spotify
         self.clock = clock
         self.temperature = temperature
+        self.timeZone = timeZone
+        self.randomIndex = randomIndex
         self.onEvent = onEvent
     }
 
     /// 準備（LLM 処理のみ。音を出さないため失敗時の pause も不要）。
+    /// テーマはプールからランダム選択（プール空なら `theme` 固定）。日付・季節コンテキストを
+    /// 台本（と letter ではお便り）の生成に注入する（仕様 s12）。
     public func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
         let cast = try resolveCast(corner: corner, djs: djs)
-
-        // 1. 選曲（曲紹介テキストの生成より前に再生可否を確定する）
+        let theme = selectTheme(for: corner)
+        onEvent?(.themeSelected(theme))
+        let dateContext = SeasonPhrases.dateContext(date: clock.now, timeZone: timeZone)
         let picker = SongPicker(llm: llm, searcher: searcher, temperature: temperature)
+        let generator = DialogueScriptGenerator(llm: llm, temperature: temperature)
+
+        // letter: ①お便り生成 → ②リクエスト曲（お便り内容を選曲コンテキストに）→ ③台本（読み上げ + 感想 + 曲振り）
+        // free_talk: ①選曲 → ②台本（いずれも曲紹介テキストの生成より前に再生可否を確定する、§3-2）
+        let letter: ListenerLetter?
+        let songContext: String
+        switch corner.format {
+        case .letter:
+            let generated = try await ListenerLetterGenerator(llm: llm, temperature: temperature)
+                .generate(theme: theme, dateContext: dateContext)
+            onEvent?(.letterReady(radioName: generated.radioName))
+            letter = generated
+            songContext = "ラジオコーナー「\(corner.title)」でリスナーのお便りに応えてかけるリクエスト曲。"
+                + "お便りの内容: \(generated.body)"
+        case .freeTalk:
+            letter = nil
+            songContext = "ラジオコーナー「\(corner.title)」（テーマ: \(theme)）の締めにかける曲"
+        }
+
         let song = try await picker.pick(SongRequest(
-            context: "ラジオコーナー「\(corner.title)」（テーマ: \(corner.theme)）の締めにかける曲",
+            context: songContext,
             promptHint: corner.songPromptHint,
             fallbackTrackUri: corner.fallbackTrackUri
         ))
         onEvent?(.songPicked(song))
 
-        // 2. 台本生成
-        let generator = DialogueScriptGenerator(llm: llm, temperature: temperature)
-        let script = try await generator.generate(corner: corner, djs: cast, song: song)
+        let script = try await generator.generate(
+            corner: corner, djs: cast, song: song,
+            theme: theme, dateContext: dateContext, letter: letter
+        )
         onEvent?(.scriptReady(lineCount: script.lines.count, totalCharacters: script.totalCharacters))
 
-        // 3. 全行を事前合成（本番の TTS 待ちをゼロに。準備は OP・冒頭曲の再生中に進む）
+        // 全行を事前合成（本番の TTS 待ちをゼロに。準備は OP・冒頭曲の再生中に進む）
         var lineAudio: [Data] = []
         lineAudio.reserveCapacity(script.lines.count)
         for line in script.lines {
@@ -84,6 +116,11 @@ public struct CornerEngine: CornerRunning, Sendable {
         }
 
         return PreparedCorner(corner: corner, song: song, script: script, lineAudio: lineAudio)
+    }
+
+    private func selectTheme(for corner: CornerTemplate) -> String {
+        guard !corner.themePool.isEmpty else { return corner.theme }
+        return corner.themePool[randomIndex(corner.themePool.count)]
     }
 
     /// 本番（発話 + 一曲。正常・例外・キャンセルいずれも最後は必ず pause）。

@@ -82,7 +82,10 @@ public struct WebApiSpotifyController: SpotifyController {
         return PlayerState(
             state: state,
             trackUri: playback.item?.uri,
-            positionSeconds: Double(playback.progressMs ?? 0) / 1000.0
+            positionSeconds: Double(playback.progressMs ?? 0) / 1000.0,
+            // 曲長は同一スナップショットから返す（別リクエストで取り直すと
+            // 直前の曲の値を掴むことがある = stale、S12 fix）。
+            durationSeconds: Double(playback.item?.durationMs ?? 0) / 1000.0
         )
     }
 

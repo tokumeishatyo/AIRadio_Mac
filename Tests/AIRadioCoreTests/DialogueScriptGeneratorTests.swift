@@ -97,6 +97,47 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("曲名を明かさず"))
         #expect(!request.prompt.contains("「」"))
     }
+
+    @Test("theme 引数がテンプレ固定の theme より優先される（s12: プール選択テーマ）")
+    func explicitThemeOverridesTemplate() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song, theme: "旅行・おでかけ")
+        #expect(request.prompt.contains("旅行・おでかけ"))
+        #expect(!request.prompt.contains("最近気になっていること"))
+    }
+
+    @Test("dateContext を渡すと日付・季節セクションと整合制約が入る（s12）")
+    func dateContextInjectsSeasonSectionAndConstraint() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song,
+            dateContext: "今日は6月12日、梅雨の時期です。")
+        #expect(request.prompt.contains("今日は6月12日、梅雨の時期です。"))
+        #expect(request.prompt.contains("季節や時候の話は、上の日付・季節に合わせる"))
+    }
+
+    @Test("dateContext なし（既定）では季節セクションを入れない")
+    func noSeasonSectionWithoutDateContext() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: djs, song: song)
+        #expect(!request.prompt.contains("日付と季節"))
+    }
+
+    @Test("letter: お便り全文・ラジオネーム紹介・リクエスト曲としての曲振りを指示する（s12 §3）")
+    func letterPromptContainsLetterAndRequestInstruction() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "夜に駆ける", artist: "YOASOBI")
+        let letter = ListenerLetter(radioName: "雨宿りのカエル", body: "梅雨の散歩で紫陽花を見つけました。")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song,
+            theme: "季節の楽しみ", dateContext: "今日は6月12日、梅雨の時期です。", letter: letter)
+        #expect(request.prompt.contains("雨宿りのカエル"))
+        #expect(request.prompt.contains("梅雨の散歩で紫陽花を見つけました。"))
+        #expect(request.prompt.contains("お便り"))
+        #expect(request.prompt.contains("リクエスト曲"))
+        #expect(request.prompt.contains("夜に駆ける"))
+        #expect(request.prompt.contains("感想"))
+    }
 }
 
 @Suite("DialogueScriptGenerator: 生成")

@@ -128,7 +128,9 @@ struct WebApiSpotifyControllerTests {
     @Test func playerStateParsesPlayback() async throws {
         let (controller, _) = makeController { _ in Self.playbackJSON }
         let state = try await controller.playerState()
-        #expect(state == PlayerState(state: .playing, trackUri: "spotify:track:abc", positionSeconds: 12.5))
+        // 曲長は URI・位置と同一スナップショットで返す（別問い合わせの stale 対策、S12 fix）。
+        #expect(state == PlayerState(
+            state: .playing, trackUri: "spotify:track:abc", positionSeconds: 12.5, durationSeconds: 210.0))
     }
 
     @Test func playerStateEmptyMeansStopped() async throws {

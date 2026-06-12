@@ -1,15 +1,50 @@
 # コーナーテンプレートの一覧。基本パターン: テーマについて DJ 二人が会話し、最後に一曲かける。
-# theme をコーナーごとに差し替えて使う。fallback_track_uri は候補曲が全滅したときの保険
+# format: free_talk（既定）= テーマトーク / letter = お便り読み上げ → 感想 → リクエスト曲
+# themes: テーマのプール。準備のたびにランダムに 1 つ選ぶ（空・未指定なら theme 固定）。
+# fallback_track_uri は候補曲が全滅したときの保険
 # （共有 URL / spotify:track: / 裸 ID いずれも可、自動正規化）。
 # play_seconds: 締めの曲を頭から何秒かけるか。0 = 曲の長さぶんフル再生。
 corners:
   - id: free_talk
     title: "フリートーク"
     theme: "最近ちょっと気になっていること"
+    themes:
+      - "お酒の楽しみ方"
+      - "おいしい料理・ごはん"
+      - "スイーツ・甘いもの"
+      - "旅行・おでかけ"
+      - "スポーツ"
+      - "音楽の楽しみ方"
+      - "映画・ドラマ"
+      - "ゲーム"
+      - "季節の楽しみ"
+      - "最近ちょっと気になっていること"
     dj_ids: [zundamon, metan]
     target_minutes: 5
     chars_per_minute: 320
     song_prompt_hint: "テーマの余韻に合う、よく知られた邦楽・洋楽"
+    fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
+    volume: 100
+    play_seconds: 60
+  - id: letter
+    title: "お便りのコーナー"
+    format: letter
+    theme: "最近ちょっと気になっていること"
+    themes:
+      - "お酒の楽しみ方"
+      - "おいしい料理・ごはん"
+      - "スイーツ・甘いもの"
+      - "旅行・おでかけ"
+      - "スポーツ"
+      - "音楽の楽しみ方"
+      - "映画・ドラマ"
+      - "ゲーム"
+      - "季節の楽しみ"
+      - "最近ちょっと気になっていること"
+    dj_ids: [zundamon, metan]
+    target_minutes: 4
+    chars_per_minute: 320
+    song_prompt_hint: "お便りの内容に寄り添う、よく知られた邦楽・洋楽"
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
     volume: 100
     play_seconds: 60

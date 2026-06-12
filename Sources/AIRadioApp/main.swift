@@ -10,6 +10,8 @@ import AIRadioInfra
 //   AIRADIO_DEMO=theme         統一テーマエンジン（OP / ニュース / ED）
 //   AIRADIO_DEMO=corner        会話コーナー（LLM 台本 → DJ 二人の会話 → 一曲）
 //   AIRADIO_DEMO=broadcast     番組 1 周（OP → トーク → ニュース天気 → ED、Ctrl-C で停止）
+//   AIRADIO_DEMO=trackwatch    診断: フル再生の終端検知を全ログで観測（AIRADIO_TRACK_QUERY で曲指定）
+// 診断: AIRADIO_SPOTIFY_LOG=1 で放送中の全 Spotify 呼び出しを経過秒付きでログ出力。
 
 // リダイレクト時も進行ログが即時見えるよう、stdout を行バッファリングにする。
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -177,6 +179,10 @@ func runCornerDemo() async {
             temperature: llmConfig.temperature,
             onEvent: { event in
                 switch event {
+                case .themeSelected(let theme):
+                    print("テーマ: \(theme)")
+                case .letterReady(let radioName):
+                    print("お便り: ラジオネーム \(radioName)")
                 case .songPicked(let track):
                     let label = track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)"
                     print("締めの曲（プレフライト済み）: \(label)")
@@ -193,6 +199,101 @@ func runCornerDemo() async {
         print("コーナー「\(corner.title)」テーマ: \(corner.theme)")
         try await engine.run(corner: corner, djs: djs)
         print("コーナー完了")
+    } catch let error as RadioError {
+        print("エラー[\(error.code)]: \(error.message)")
+    } catch {
+        print("エラー: \(error)")
+    }
+}
+
+/// 診断: SpotifyController の全呼び出しを経過秒付きでログする（trackwatch 用）。
+struct LoggingSpotifyController: SpotifyController {
+    let inner: any SpotifyController
+    let start: Date
+
+    private func log(_ message: String) {
+        print(String(format: "[%7.2fs] %@", Date().timeIntervalSince(start), message))
+    }
+
+    func play(uri: String) async throws {
+        log("play(\(uri))")
+        try await inner.play(uri: uri)
+        log("play 完了")
+    }
+    func pause() async throws {
+        log("pause()")
+        try await inner.pause()
+    }
+    func setVolume(_ percent: Int) async throws {
+        log("setVolume(\(percent))")
+        try await inner.setVolume(percent)
+    }
+    func seek(toSeconds seconds: Int) async throws {
+        log("seek(\(seconds))")
+        try await inner.seek(toSeconds: seconds)
+    }
+    func playerState() async throws -> PlayerState {
+        let state = try await inner.playerState()
+        log("playerState → \(state.state.rawValue) uri=\(state.trackUri ?? "nil")"
+            + " pos=\(String(format: "%.1f", state.positionSeconds))"
+            + " dur=\(String(format: "%.1f", state.durationSeconds))")
+        return state
+    }
+    func currentTrackDurationSeconds() async throws -> Double {
+        let duration = try await inner.currentTrackDurationSeconds()
+        log("duration → \(String(format: "%.1f", duration))")
+        return duration
+    }
+}
+
+/// 診断デモ: OP → 冒頭曲の遷移を再現し、waitForTrackToFinish の挙動を全ログで観測する。
+/// 「曲が途中で終わる」報告（S12 ライブ確認）の原因切り分け用。
+func runTrackWatchDemo() async {
+    print("ケイラボAIラジオ Mac版 — trackwatch 診断（OP 遷移再現 + フル再生監視）")
+    do {
+        let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
+        let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+        let auth = try makeSpotifyAuth()
+        let http = URLSessionHTTPClient()
+        let searcher = SpotifyWebSearcher(auth: auth, market: config.market, http: http)
+        let inner = try makeSpotifyController(auth: auth, http: http)
+        let clock = SystemClock()
+        let spotify = LoggingSpotifyController(inner: inner, start: Date())
+
+        // 0. 監視対象の長尺曲（約 6 分）を検索で確定
+        let query = ProcessInfo.processInfo.environment["AIRADIO_TRACK_QUERY"] ?? "Bohemian Rhapsody Queen"
+        guard let target = try await searcher.search(query: query, limit: 3).first(where: { $0.isPlayable }) else {
+            print("対象曲が見つかりません: \(query)")
+            return
+        }
+        print("対象曲: \(target.artist) / \(target.title) \(target.uri)")
+
+        // 1. OP の終わり方を再現: BGM を頭から数秒 → 終端 10 秒前へシーク → 自然終了 → pause
+        print("--- OP 遷移の再現（BGM 終端で停止した状態を作る）---")
+        try await spotify.play(uri: themes.opening.theme.trackUri)
+        try await clock.sleep(seconds: 3)
+        let bgmDuration = try await spotify.currentTrackDurationSeconds()
+        if bgmDuration > 10 {
+            try await spotify.seek(toSeconds: Int(bgmDuration.rounded()) - 10)
+        }
+        try await clock.sleep(seconds: 12)
+        try await spotify.pause()
+
+        // 2. 冒頭曲: play 直後から waitForTrackToFinish を全ログで観測
+        print("--- 冒頭曲のフル再生監視（曲長 \(target.uri)）---")
+        try await spotify.play(uri: target.uri)
+        try await spotify.setVolume(100)
+        let waitStart = Date()
+        try await spotify.waitForTrackToFinish(of: target.uri, clock: clock)
+        let waited = Date().timeIntervalSince(waitStart)
+        print(String(format: "waitForTrackToFinish が %.1f 秒で戻りました", waited))
+        let finalState = try await spotify.playerState()
+        print("最終状態: \(finalState.state.rawValue) pos=\(String(format: "%.1f", finalState.positionSeconds))")
+        if finalState.state == .playing, finalState.trackUri == target.uri {
+            print("⚠️ 曲がまだ再生中に戻っています（途中切りを再現）")
+        }
+        try await spotify.pause()
+        print("診断完了")
     } catch let error as RadioError {
         print("エラー[\(error.code)]: \(error.message)")
     } catch {
@@ -228,6 +329,7 @@ case "spotify": await runSpotifyDemo()
 case "theme": await runThemeDemo()
 case "news": await runNewsDemo()
 case "corner": await runCornerDemo()
+case "trackwatch": await runTrackWatchDemo()
 case "broadcast":
     // 放送全体を 1 つの Task で回し、Ctrl-C（SIGINT）で Task.cancel()（CLAUDE.md §3-1）。
     let broadcastTask = Task { await runBroadcastDemo() }

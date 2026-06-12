@@ -18,6 +18,9 @@ program:
       play_seconds: 0     # 0 = フル再生
     - type: talk
       corner_id: free_talk
+    # お便りコーナー（format: letter、仕様 s12）。お便り → ニュースの順で進む。
+    - type: talk
+      corner_id: letter
     - type: news
       dj_id: ryusei
     - type: ending

@@ -40,12 +40,23 @@ public struct DialogueScript: Sendable, Equatable {
     }
 }
 
+/// コーナーの進行フォーマット（仕様 s12 §2）。
+public enum CornerFormat: String, Sendable, Equatable {
+    /// テーマについて DJ 二人が会話し、最後に一曲かける（基本パターン）。
+    case freeTalk = "free_talk"
+    /// 架空リスナーのお便りを読み上げ → 感想 → リクエスト曲。
+    case letter
+}
+
 /// コーナーのテンプレート（`config/corners.yaml`）。
 /// 基本パターン: テーマについて DJ 二人が会話し、最後に一曲かける。
 public struct CornerTemplate: Sendable, Equatable {
     public var id: String
     public var title: String
     public var theme: String
+    /// テーマのプール。空でなければ準備のたびにランダムに 1 つ選ぶ（空なら `theme` 固定）。
+    public var themePool: [String]
+    public var format: CornerFormat
     public var djIds: [String]
     public var targetMinutes: Int
     public var charsPerMinute: Int
@@ -59,6 +70,8 @@ public struct CornerTemplate: Sendable, Equatable {
         id: String,
         title: String,
         theme: String,
+        themePool: [String] = [],
+        format: CornerFormat = .freeTalk,
         djIds: [String],
         targetMinutes: Int = 5,
         charsPerMinute: Int = 320,
@@ -70,6 +83,8 @@ public struct CornerTemplate: Sendable, Equatable {
         self.id = id
         self.title = title
         self.theme = theme
+        self.themePool = themePool
+        self.format = format
         self.djIds = djIds
         self.targetMinutes = targetMinutes
         self.charsPerMinute = charsPerMinute

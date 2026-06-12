@@ -54,10 +54,15 @@ extension SpotifyController {
 }
 
 extension SpotifyController {
-    /// 指定 URI の曲を**終わりまで見届けて**戻る（S10 fix）。
+    /// 指定 URI の曲を**終わりまで見届けて**戻る（S10 fix、S12 fix で stale 耐性を強化）。
     /// 1) URI 切替確認: 再生切替直後は `/me/player` が**前の曲のメタデータ**を返すことがあるため、
-    ///    切替を確認してから曲長・位置を読む（読み違えると前の曲の長さで早切りする）。
-    /// 2) 終端 `marginSeconds` 手前までまとめて待つ。
+    ///    切替を確認してから曲長・位置を読む。曲長は **URI と同一スナップショット**の
+    ///    `PlayerState.durationSeconds` を使う（別リクエストで取り直すと直前の曲の曲長を掴み、
+    ///    前の曲の長さで途中切りする。S12 で実際に踏んだ）。
+    /// 2) 残り `marginSeconds` 手前まで待つ。一回のまとめ寝ではなく **`recheckSeconds` 上限の
+    ///    チャンクで寝て、起きるたびに位置を読み直す**。snapshot が stale でも次の読み直しで
+    ///    自己修正されるため、誤った残り時間を最後まで信じて早切りしない。タイマーの遅延
+    ///    （App Nap 等。実測 350 秒寝で +23 秒）があっても読み直し基準なのでデッドエアが伸びない。
     /// 3) 実終端の検知: 「停止 / 別トラックへ遷移 / 再生位置が終端到達 / **位置が進んでいない**」の
     ///    いずれかで即座に戻る。曲が終わっても is_playing=true を返し続ける Spotify の癖があっても、
     ///    位置の停滞（0.5 秒間隔で不変）で確実に抜けられる。
@@ -67,17 +72,22 @@ extension SpotifyController {
         switchPollSeconds: Double = 0.2,
         switchMaxAttempts: Int = 15,
         marginSeconds: Double = 5,
-        endPollSeconds: Double = 0.5
+        endPollSeconds: Double = 0.5,
+        recheckSeconds: Double = 30
     ) async throws {
-        // 1) URI 切替確認 + 残り秒数の算出
-        var remaining = 0.0
+        // 1) URI 切替確認 + 同一スナップショットの曲長・位置
         var duration = 0.0
+        var position = 0.0
         for attempt in 0..<switchMaxAttempts {
             let state = try await playerState()
             if state.trackUri == uri {
-                duration = try await currentTrackDurationSeconds()
+                duration = state.durationSeconds
+                if duration <= 0 {
+                    // スナップショットに曲長を持たない実装（AppleScript 等）だけ別問い合わせに倒す。
+                    duration = (try? await currentTrackDurationSeconds()) ?? 0
+                }
                 if duration > 0 {
-                    remaining = max(duration - state.positionSeconds, 0)
+                    position = state.positionSeconds
                     break
                 }
             }
@@ -86,10 +96,30 @@ extension SpotifyController {
             }
         }
 
-        // 2) 終端 margin 手前までまとめて待つ
-        let bulk = max(remaining - marginSeconds, 0)
-        if bulk > 0 {
-            try await clock.sleep(seconds: bulk)
+        // 2) 残り margin 手前まで「チャンク寝 → 位置の読み直し」を繰り返す。
+        //    budget はリピート再生・位置が進まない異常系での無限待ち防止の安全弁。
+        var budget = max(duration - position, 0) + 60
+        while duration > 0 {
+            let remaining = duration - position
+            if remaining <= marginSeconds { break }
+            let nap = min(remaining - marginSeconds, recheckSeconds)
+            guard budget >= nap else { return }
+            try await clock.sleep(seconds: nap)
+            budget -= nap
+
+            let state = try await playerState()
+            guard state.trackUri == uri else { return }   // 別トラックへ遷移 = この曲は終わった
+            if state.state != .playing {
+                // 停止に見えても stale の可能性があるため、一拍おいて再確認してから確定する。
+                try await clock.sleep(seconds: endPollSeconds)
+                let recheck = try await playerState()
+                guard recheck.state == .playing, recheck.trackUri == uri else { return }
+                position = recheck.positionSeconds
+                if recheck.durationSeconds > 0 { duration = recheck.durationSeconds }
+                continue
+            }
+            position = state.positionSeconds
+            if state.durationSeconds > 0 { duration = state.durationSeconds }
         }
 
         // 3) 実終端の検知（margin + 10 秒で打ち切り = 暴走防止の保険）

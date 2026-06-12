@@ -26,6 +26,42 @@ struct CornersConfigLoaderTests {
         #expect(corner.targetCharacters == 1600)
         #expect(corner.volume == 85)
         #expect(corner.playSeconds == 0)
+        // S12: 省略時はプール空 + free_talk 形式
+        #expect(corner.themePool.isEmpty)
+        #expect(corner.format == .freeTalk)
+    }
+
+    @Test("themes（テーマプール）と format: letter を読み込む（s12）")
+    func loadsThemePoolAndFormat() throws {
+        let yaml = """
+        corners:
+          - id: letter
+            title: "お便りのコーナー"
+            format: letter
+            theme: "保険のテーマ"
+            themes: ["お酒", "旅行", "映画"]
+            dj_ids: [a, b]
+            fallback_track_uri: "spotify:track:X"
+        """
+        let corner = try CornersConfigLoader.load(yaml: yaml)[0]
+        #expect(corner.format == .letter)
+        #expect(corner.themePool == ["お酒", "旅行", "映画"])
+        #expect(corner.theme == "保険のテーマ")
+    }
+
+    @Test("不正な format は設定エラー")
+    func invalidFormatThrows() {
+        #expect(throws: ConfigError.self) {
+            _ = try CornersConfigLoader.load(yaml: """
+            corners:
+              - id: c
+                title: "T"
+                format: quiz
+                theme: "TH"
+                dj_ids: [a]
+                fallback_track_uri: "spotify:track:X"
+            """)
+        }
     }
 
     @Test("明示した値が省略値より優先される")

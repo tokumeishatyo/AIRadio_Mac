@@ -22,15 +22,37 @@ func makeSpotifyController(auth: SpotifyAuth, http: any HTTPClient) throws -> We
     return WebApiSpotifyController(auth: auth, http: http, preferredDeviceName: config.deviceName)
 }
 
+/// メニュー「番組の長さ」の UserDefaults キー（値は ProgramLength.rawValue: "10" / "endless" 等）。
+let programLengthDefaultsKey = "programLength"
+
+/// 番組の長さ: UserDefaults の選択値（メニューで変更・保持）が優先、なければ program.yaml の既定値。
+func selectedProgramLength(defaultLength: ProgramLength) -> ProgramLength {
+    if let raw = UserDefaults.standard.string(forKey: programLengthDefaultsKey),
+       let length = ProgramLength(rawValue: raw) {
+        return length
+    }
+    return defaultLength
+}
+
+/// 番組の長さの表示ラベル。
+func programLengthLabel(_ length: ProgramLength) -> String {
+    switch length {
+    case .corners(let count): return "トーク \(count) 本"
+    case .endless: return "エンドレス"
+    }
+}
+
 /// 放送 1 本ぶんの配線済み一式（broadcast デモとメニューバー UI が共用）。
 struct BroadcastStack {
     let engine: BroadcastEngine
-    let program: Program
+    let plan: ProgramPlan
     let corners: [CornerTemplate]
     let djs: [DjProfile]
+    /// 放送中の操作（「ED で終了」）。
+    let control: BroadcastControl
 
     func run() async throws {
-        try await engine.run(program: program, corners: corners, djs: djs)
+        try await engine.run(plan: plan, corners: corners, djs: djs, control: control)
     }
 }
 
@@ -40,7 +62,7 @@ func makeBroadcastStack(
     onBroadcastEvent: (@Sendable (BroadcastEvent) -> Void)? = nil,
     onCornerEvent: (@Sendable (CornerEvent) -> Void)? = nil
 ) throws -> BroadcastStack {
-    let program = try ProgramConfigLoader.load(path: "config/program.yaml")
+    let blueprint = try ProgramConfigLoader.load(path: "config/program.yaml")
     let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
     let research = try ResearchConfigLoader.load(path: "config/research.yaml")
     let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
@@ -71,7 +93,7 @@ func makeBroadcastStack(
         onEvent: onCornerEvent
     )
     // ニュース原稿は LLM アナウンサー原稿（S11）。読み手（news の dj_id、なければ anchor）のペルソナを使う。
-    let newsDjId = program.segments.first { $0.kind == .news }?.djId ?? program.anchorDjId
+    let newsDjId = blueprint.newsDjId ?? blueprint.anchorDjId
     let newsPersona = djs.first { $0.id == newsDjId }?.persona ?? ""
     let newsProvider = LlmNewsScriptProvider(
         news: NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http),
@@ -100,7 +122,11 @@ func makeBroadcastStack(
         clock: clock,
         onEvent: onBroadcastEvent
     )
-    return BroadcastStack(engine: engine, program: program, corners: corners, djs: djs)
+    let plan = ProgramPlan(
+        blueprint: blueprint,
+        length: selectedProgramLength(defaultLength: blueprint.defaultLength)
+    )
+    return BroadcastStack(engine: engine, plan: plan, corners: corners, djs: djs, control: BroadcastControl())
 }
 
 /// コーナー進行のコンソール出力（デモ・常駐どちらでも進行ログとして使う）。
@@ -138,6 +164,8 @@ func makeBroadcastStack(
         print("  ♪ \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
     case .songFinished(_, let reason):
         print("  ♪ 曲終了（検知: \(reason.rawValue)）")
+    case .endingRequested:
+        print("=== ED で終了を受け付けました（残りのコーナーを飛ばして ED へ）===")
     case .broadcastFinished:
         print("=== 放送終了 ===")
     }

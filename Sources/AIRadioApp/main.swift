@@ -310,7 +310,9 @@ func runBroadcastDemo() async {
             onBroadcastEvent: printBroadcastEvent,
             onCornerEvent: printCornerEvent
         )
-        print("番組「\(stack.program.title)」を開始します（全 \(stack.program.segments.count) セグメント）")
+        let total = stack.plan.totalSegmentCount.map(String.init) ?? "∞"
+        print("番組「\(stack.plan.title)」を開始します"
+            + "（番組の長さ: \(programLengthLabel(stack.plan.length)) / 全 \(total) セグメント）")
         try await stack.run()
     } catch is CancellationError {
         print("停止しました（完全静寂）")

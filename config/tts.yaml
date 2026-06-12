@@ -6,6 +6,6 @@ voicevox:
   credit: "VOICEVOX:{speaker}"
 # 合成音声の再生音量（0.0〜1.0）。VOICEVOX はほぼフルスケールで出力されるため、
 # Spotify の音楽より声が大きすぎる場合はここを下げてバランスを取る。
-playback_volume: 0.8
+playback_volume: 1.0
 # 話速（1.0 = 標準、0.5〜2.0）。1.1〜1.3 がテンポの良いラジオの目安。
 speed_scale: 1.15

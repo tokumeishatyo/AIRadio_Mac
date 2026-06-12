@@ -2,15 +2,26 @@ import AppKit
 import AIRadioCore
 import AIRadioInfra
 
-/// メニューバー常駐 UI（仕様 s9）。📻 アイコン + メニューで放送の開始 / 停止。
+/// メニューバー常駐 UI（仕様 s9 + s13）。📻 アイコン + メニューで放送の開始 / 停止 /
+/// ED で終了 / 番組の長さ（UserDefaults 保持）。
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
+    /// メニュー「番組の長さ」の選択肢（仕様 s13 §5）。
+    private static let lengthChoices: [ProgramLength] = [
+        .corners(10), .corners(20), .corners(30), .endless,
+    ]
+
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "停止中", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "放送を開始", action: nil, keyEquivalent: "")
+    private let endingItem = NSMenuItem(title: "ED で終了", action: nil, keyEquivalent: "")
+    private let lengthMenu = NSMenu()
     let session: BroadcastSession
-    private var segmentCount = 0
+    private var segmentCountLabel = "?"
     private var lastErrorCode: String?
+    private var isBroadcasting = false
+    /// 放送中の操作ハンドル（「ED で終了」用。放送開始時にセット、idle で破棄）。
+    private var activeControl: BroadcastControl?
 
     override init() {
         // onStateChange は self 確定前に作るため、弱参照ボックス経由で UI へ届ける。
@@ -28,6 +39,23 @@ final class MenuBarController: NSObject {
         toggleItem.target = self
         toggleItem.action = #selector(toggleBroadcast)
         menu.addItem(toggleItem)
+        endingItem.target = self
+        endingItem.action = #selector(requestEnding)
+        menu.addItem(endingItem)
+        menu.addItem(.separator())
+
+        // 番組の長さ（次の放送開始から反映。UserDefaults に保持、既定値は program.yaml）。
+        let lengthItem = NSMenuItem(title: "番組の長さ", action: nil, keyEquivalent: "")
+        for choice in Self.lengthChoices {
+            let item = NSMenuItem(title: programLengthLabel(choice), action: #selector(selectLength(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.rawValue
+            lengthMenu.addItem(item)
+        }
+        lengthItem.submenu = lengthMenu
+        menu.addItem(lengthItem)
+        refreshLengthCheckmarks()
+
         menu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -48,6 +76,37 @@ final class MenuBarController: NSObject {
         }
     }
 
+    /// 「ED で終了」: 現在のセグメント（+ 準備済みの直後トーク）を流したら ED で締める（仕様 s13 §4）。
+    @objc private func requestEnding() {
+        activeControl?.requestEnding()
+        stateItem.title = "放送中…（ED で終了します）"
+    }
+
+    @objc private func selectLength(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(raw, forKey: programLengthDefaultsKey)
+        refreshLengthCheckmarks()
+    }
+
+    private func refreshLengthCheckmarks() {
+        let current = currentLengthSelection()
+        for item in lengthMenu.items {
+            item.state = (item.representedObject as? String) == current.rawValue ? .on : .off
+        }
+    }
+
+    /// 現在の選択値（UserDefaults → program.yaml の既定値の順）。
+    private func currentLengthSelection() -> ProgramLength {
+        let defaultLength = (try? ProgramConfigLoader.load(path: "config/program.yaml"))?.defaultLength
+            ?? .corners(10)
+        return selectedProgramLength(defaultLength: defaultLength)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem === endingItem { return isBroadcasting && activeControl != nil }
+        return true
+    }
+
     private func startBroadcast() async {
         let stack: BroadcastStack
         do {
@@ -62,8 +121,9 @@ final class MenuBarController: NSObject {
             showStartupError(error)
             return
         }
-        segmentCount = stack.program.segments.count
+        segmentCountLabel = stack.plan.totalSegmentCount.map(String.init) ?? "∞"
         lastErrorCode = nil
+        activeControl = stack.control
         await session.start {
             do {
                 try await stack.run()
@@ -78,11 +138,13 @@ final class MenuBarController: NSObject {
     }
 
     private func apply(state: BroadcastSession.State) {
+        isBroadcasting = state == .broadcasting
         switch state {
         case .idle:
             toggleItem.title = "放送を開始"
             let suffix = lastErrorCode.map { "（直近エラー: \($0)）" } ?? ""
             stateItem.title = "停止中\(suffix)"
+            activeControl = nil
         case .broadcasting:
             toggleItem.title = "放送を停止"
             stateItem.title = "放送中…"
@@ -92,9 +154,11 @@ final class MenuBarController: NSObject {
     private func apply(event: BroadcastEvent) {
         switch event {
         case .segmentStarted(let index, let kind):
-            stateItem.title = "放送中: \(kind.rawValue) (\(index + 1)/\(segmentCount))"
+            stateItem.title = "放送中: \(kind.rawValue) (\(index + 1)/\(segmentCountLabel))"
         case .segmentFailed(_, _, let code, _):
             lastErrorCode = code
+        case .endingRequested:
+            stateItem.title = "放送中…（ED で終了します）"
         case .segmentFinished, .songStarted, .songFinished, .broadcastFinished:
             break
         }

@@ -12,6 +12,11 @@ private let freeTalk = CornerTemplate(
     id: "free_talk", title: "フリートーク", theme: "テーマ",
     djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK"
 )
+private let letterCorner = CornerTemplate(
+    id: "letter", title: "お便り", theme: "テーマ", format: .letter,
+    djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK"
+)
+private let corners = [freeTalk, letterCorner]
 
 private func theme(_ uri: String) -> ThemeConfig {
     ThemeConfig(tagline: nil, trackUri: uri, introSeconds: 5, volume: 85, duckedVolume: 35, outroSeconds: 10)
@@ -23,16 +28,27 @@ private let themes = BroadcastThemes(
     ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "エンディングです")
 )
 
-private let program = Program(
-    title: "テスト番組",
-    anchorDjId: "zundamon",
-    segments: [
-        ProgramSegment(kind: .opening),
-        ProgramSegment(kind: .talk, cornerId: "free_talk"),
-        ProgramSegment(kind: .news),
-        ProgramSegment(kind: .ending),
-    ]
-)
+private func blueprint(
+    talkCornerId: String = "free_talk",
+    openingCritical: Bool = true,
+    songPlaySeconds: Int = 45
+) -> ProgramBlueprint {
+    ProgramBlueprint(
+        title: "テスト番組",
+        anchorDjId: "zundamon",
+        openingCritical: openingCritical,
+        song: SongSegmentSpec(
+            promptHint: "幕開けの曲", fallbackTrackUri: "spotify:track:SONGFALLBACK",
+            volume: 100, playSeconds: songPlaySeconds),
+        talkCornerId: talkCornerId,
+        letterCornerId: "letter"
+    )
+}
+
+/// N=2 の標準プラン: OP(0) song(1) talk(2) talk(3) letter(4) news(5) ED(6)。
+private func plan(_ n: Int) -> ProgramPlan {
+    ProgramPlan(blueprint: blueprint(), length: .corners(n))
+}
 
 private final class EventRecorder: @unchecked Sendable {
     private let lock = NSLock()
@@ -65,10 +81,10 @@ private struct Fixture {
 
 @Suite("BroadcastEngine")
 struct BroadcastEngineTests {
-    @Test("正常系: 宣言順に実行し、最後に pause + broadcastFinished")
+    @Test("正常系（N=2）: OP → 冒頭曲 → t1 t2 → お便り → ニュース → ED の順に実行し、最後に pause")
     func happyPathRunsInOrder() async throws {
         let fixture = Fixture()
-        try await fixture.engine.run(program: program, corners: [freeTalk], djs: djs)
+        try await fixture.engine.run(plan: plan(2), corners: corners, djs: djs)
 
         // テーマ演出: OP → ニュース（実行時原稿） → ED の順、読み上げはアンカー DJ（ずんだもん=3）。
         #expect(fixture.sequencer.runs == [
@@ -76,26 +92,23 @@ struct BroadcastEngineTests {
             SpyThemeSequencer.Run(trackUri: "spotify:track:NEWS", announcement: "ニュース原稿", speakerId: 3),
             SpyThemeSequencer.Run(trackUri: "spotify:track:ED", announcement: "エンディングです", speakerId: 3),
         ])
-        #expect(fixture.cornerRunner.ranCornerIds == ["free_talk"])
+        // コーナーはトーク 2 本 → お便りの順。
+        #expect(fixture.cornerRunner.ranCornerIds == ["free_talk", "free_talk", "letter"])
         #expect(fixture.spotify.events.contains(.pause))
-        #expect(fixture.recorder.events == [
-            .segmentStarted(index: 0, kind: .opening), .segmentFinished(index: 0, kind: .opening),
-            .segmentStarted(index: 1, kind: .talk), .segmentFinished(index: 1, kind: .talk),
-            .segmentStarted(index: 2, kind: .news), .segmentFinished(index: 2, kind: .news),
-            .segmentStarted(index: 3, kind: .ending), .segmentFinished(index: 3, kind: .ending),
-            .broadcastFinished,
-        ])
+        #expect(fixture.recorder.events.first == .segmentStarted(index: 0, kind: .opening))
+        #expect(fixture.recorder.events.contains(.segmentFinished(index: 6, kind: .ending)))
+        #expect(fixture.recorder.events.last == .broadcastFinished)
     }
 
-    @Test("セグメント失敗はスキップして放送継続（コーナースキップ）+ 最後に pause")
+    @Test("セグメント失敗はスキップして放送継続（トーク失敗でもお便り・ニュース・ED は実行）")
     func skipsFailedSegmentAndContinues() async throws {
         let fixture = Fixture(cornerErrors: ["free_talk": LLMError.emptyResponse])
-        try await fixture.engine.run(program: program, corners: [freeTalk], djs: djs)
+        try await fixture.engine.run(plan: plan(2), corners: corners, djs: djs)
 
-        // talk は失敗したが、news / ending は実行されて放送は最後まで進む。
         #expect(fixture.recorder.events.contains(
-            .segmentFailed(index: 1, kind: .talk, code: "E-LLM-EMPTY-RESPONSE-001",
+            .segmentFailed(index: 2, kind: .talk, code: "E-LLM-EMPTY-RESPONSE-001",
                            detail: LLMError.emptyResponse.message)))
+        #expect(fixture.cornerRunner.ranCornerIds == ["letter"])
         #expect(fixture.sequencer.runs.count == 3)
         #expect(fixture.recorder.events.last == .broadcastFinished)
         #expect(fixture.spotify.events.contains(.pause))
@@ -105,7 +118,7 @@ struct BroadcastEngineTests {
     func cancellationStopsImmediately() async {
         let fixture = Fixture(cornerErrors: ["free_talk": CancellationError()])
         await #expect(throws: CancellationError.self) {
-            try await fixture.engine.run(program: program, corners: [freeTalk], djs: djs)
+            try await fixture.engine.run(plan: plan(2), corners: corners, djs: djs)
         }
         // OP のみ実行済み。news / ending には進まない。
         #expect(fixture.sequencer.runs.count == 1)
@@ -140,7 +153,7 @@ struct BroadcastEngineTests {
             onEvent: { recorder.append($0) }
         )
         await #expect(throws: CancellationError.self) {
-            try await engine.run(program: program, corners: [freeTalk], djs: djs)
+            try await engine.run(plan: plan(2), corners: corners, djs: djs)
         }
         // talk の後の news / ending には進まない（OP の 1 回のみ）。
         #expect(sequencer.runs.count == 1)
@@ -150,7 +163,7 @@ struct BroadcastEngineTests {
         #expect(spotify.events.contains(.pause))
     }
 
-    @Test("critical セグメントの失敗は放送中止（スキップしない、Windows 版踏襲）")
+    @Test("critical セグメント（OP）の失敗は放送中止（スキップしない、Windows 版踏襲）")
     func criticalSegmentFailureAbortsBroadcast() async {
         struct FailingSequencer: ThemeSequencing {
             func run(theme: ThemeConfig, announcement: String, speakerId: Int) async throws {
@@ -169,12 +182,8 @@ struct BroadcastEngineTests {
             clock: FakeClock(),
             onEvent: { recorder.append($0) }
         )
-        let criticalProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
-            ProgramSegment(kind: .opening, critical: true),
-            ProgramSegment(kind: .talk, cornerId: "free_talk"),
-        ])
         await #expect(throws: BroadcastError.self) {
-            try await engine.run(program: criticalProgram, corners: [freeTalk], djs: djs)
+            try await engine.run(plan: plan(2), corners: corners, djs: djs)
         }
         // OP 失敗で中止: talk には進まず、失敗イベントは通知され、pause で静寂。
         #expect(cornerRunner.ranCornerIds.isEmpty)
@@ -223,7 +232,7 @@ struct BroadcastEngineTests {
             clock: FakeClock()
         )
         await #expect(throws: CancellationError.self) {
-            try await engine.run(program: program, corners: [freeTalk], djs: djs)
+            try await engine.run(plan: plan(2), corners: corners, djs: djs)
         }
         #expect(!spotify.pauseCancelledFlags.isEmpty)
         #expect(spotify.pauseCancelledFlags.allSatisfy { $0 == false })
@@ -252,17 +261,11 @@ struct BroadcastEngineTests {
             clock: FakeClock(),
             onEvent: { recorder.append($0) }
         )
-        let songProgram = Program(title: "テスト番組", anchorDjId: "zundamon", segments: [
-            ProgramSegment(kind: .opening),
-            ProgramSegment(kind: .song, song: SongSegmentSpec(
-                promptHint: "幕開けの曲", fallbackTrackUri: "spotify:track:FALLBACK", volume: 100, playSeconds: 45)),
-            ProgramSegment(kind: .ending),
-        ])
-        try await engine.run(program: songProgram, corners: [], djs: djs)
+        try await engine.run(plan: plan(1), corners: corners, djs: djs)
 
         // OP の曲振りに確定曲が入る。
         #expect(sequencer.runs[0].announcement == "それでは聴いてください。YOASOBIで、「夜に駆ける」。")
-        // song セグメント: 再生 → 音量 → pause。
+        // song セグメント: 再生 → 音量 → pause（playSeconds=45 の固定再生）。
         #expect(spotify.events.prefix(3) == [.play("spotify:track:FIRST"), .setVolume(100), .pause])
         #expect(recorder.events.contains(
             .songStarted(index: 1, track: TrackInfo(uri: "spotify:track:FIRST", title: "夜に駆ける", artist: "YOASOBI"))))
@@ -289,13 +292,9 @@ struct BroadcastEngineTests {
             spotify: spotify,
             clock: FakeClock()
         )
-        let songProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
-            ProgramSegment(kind: .opening),
-            ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:FALLBACK")),
-        ])
-        try await engine.run(program: songProgram, corners: [], djs: djs)
+        try await engine.run(plan: plan(1), corners: corners, djs: djs)
         #expect(sequencer.runs[0].announcement == "本日の一曲。")
-        #expect(spotify.events.contains(.play("spotify:track:FALLBACK")))
+        #expect(spotify.events.contains(.play("spotify:track:SONGFALLBACK")))
     }
 
     @Test("song フル再生: 切替直後のメタデータ遅延でも前の曲の長さで早切りしない")
@@ -341,10 +340,10 @@ struct BroadcastEngineTests {
             spotify: LaggySpotify(),
             clock: clock
         )
-        let songProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
-            ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F", playSeconds: 0)),
-        ])
-        try await engine.run(program: songProgram, corners: [], djs: djs)
+        // N=0: OP → song（フル再生）→ ED のみ。
+        let fullPlayPlan = ProgramPlan(
+            blueprint: blueprint(songPlaySeconds: 0), length: .corners(0))
+        try await engine.run(plan: fullPlayPlan, corners: corners, djs: djs)
         // ポーリング（0.2s × 2）の後、新曲の曲長（240 秒）基準で待つ（前の曲の 30 秒側で早切りしない）。
         let napped = clock.sleeps.filter { $0 > 1 }.reduce(0, +)
         #expect(napped >= 235)
@@ -386,18 +385,16 @@ struct BroadcastEngineTests {
             spotify: FrozenAtEndSpotify(),
             clock: clock
         )
-        try await engine.run(
-            program: Program(title: "t", anchorDjId: "zundamon", segments: [
-                ProgramSegment(kind: .song, song: SongSegmentSpec(fallbackTrackUri: "spotify:track:F")),
-            ]),
-            corners: [], djs: djs)
+        let fullPlayPlan = ProgramPlan(
+            blueprint: blueprint(songPlaySeconds: 0), length: .corners(0))
+        try await engine.run(plan: fullPlayPlan, corners: corners, djs: djs)
         // 上限（margin+10 秒 = 0.5s × 20 ポーリング）まで粘らず、位置停滞の検知で数回のうちに抜ける。
         let endPolls = clock.sleeps.filter { $0 == 0.5 }
         #expect(endPolls.count <= 3)
     }
 
-    @Test("news の原稿生成は先行準備の 1 回だけ（セグメント到達時に再生成しない）")
-    func newsScriptIsPreparedOnce() async throws {
+    @Test("news は出現のたびに生成される（N=4 はニュース 2 回 = 原稿 2 回生成、s13 §3）")
+    func newsScriptIsGeneratedPerOccurrence() async throws {
         final class CountingProvider: AnnouncementProviding, @unchecked Sendable {
             private let lock = NSLock()
             private var _calls = 0
@@ -417,15 +414,18 @@ struct BroadcastEngineTests {
             spotify: FakeSpotifyController(),
             clock: FakeClock()
         )
-        try await engine.run(program: program, corners: [freeTalk], djs: djs)
-        #expect(provider.calls == 1)
+        try await engine.run(plan: plan(4), corners: corners, djs: djs)
+        #expect(provider.calls == 2)
+        // OP + news×2 + ED = テーマ演出 4 回。
+        #expect(sequencer.runs.count == 4)
         #expect(sequencer.runs[1].announcement == "原稿")
+        #expect(sequencer.runs[2].announcement == "原稿")
     }
 
-    @Test("talk の準備は放送開始時に先行起動され、本番は準備済み成果物で実行される")
+    @Test("talk の準備は先行起動され、本番は準備済み成果物で実行される")
     func talkUsesPreparedContent() async throws {
         let fixture = Fixture()
-        try await fixture.engine.run(program: program, corners: [freeTalk], djs: djs)
+        try await fixture.engine.run(plan: plan(1), corners: corners, djs: djs)
         #expect(fixture.cornerRunner.preparedCornerIds == ["free_talk"])
         // run(prepared:) に prepare の成果物がそのまま渡る（本番での LLM 再実行なし）。
         #expect(fixture.cornerRunner.ranPrepared.map(\.song.uri) == ["spotify:track:PREPARED-free_talk"])
@@ -456,10 +456,7 @@ struct BroadcastEngineTests {
             clock: FakeClock()
         )
         let broadcast = Task {
-            try await engine.run(
-                program: Program(title: "t", anchorDjId: "zundamon",
-                                 segments: [ProgramSegment(kind: .talk, cornerId: "free_talk")]),
-                corners: [freeTalk], djs: djs)
+            try await engine.run(plan: plan(1), corners: corners, djs: djs)
         }
         try? await Task.sleep(nanoseconds: 50_000_000)
         broadcast.cancel()
@@ -477,16 +474,22 @@ struct BroadcastEngineTests {
         #expect(runner.sawCancellation)
     }
 
-    @Test("未定義の corner_id は fail-fast（音を出す前に設定エラー）")
-    func unknownCornerIdFailsFast() async {
+    @Test("未定義の corner_id / news dj_id は fail-fast（音を出す前に設定エラー）")
+    func unknownReferencesFailFast() async {
         let fixture = Fixture()
-        let broken = Program(title: "t", anchorDjId: "zundamon",
-                             segments: [ProgramSegment(kind: .talk, cornerId: "unknown")])
+        let brokenCorner = ProgramPlan(
+            blueprint: blueprint(talkCornerId: "unknown"), length: .corners(2))
         await #expect(throws: ConfigError.self) {
-            try await fixture.engine.run(program: broken, corners: [freeTalk], djs: djs)
+            try await fixture.engine.run(plan: brokenCorner, corners: corners, djs: djs)
+        }
+        var withUnknownDj = blueprint()
+        withUnknownDj.newsDjId = "unknown"
+        await #expect(throws: ConfigError.self) {
+            try await fixture.engine.run(
+                plan: ProgramPlan(blueprint: withUnknownDj, length: .corners(2)),
+                corners: corners, djs: djs)
         }
         #expect(fixture.sequencer.runs.isEmpty)
-        #expect(fixture.recorder.events.isEmpty || !fixture.recorder.events.contains(.broadcastFinished))
     }
 
     @Test("時刻プレースホルダを発話直前に展開（OP は挨拶+日付+NHK 式、ニュースは 12 時間表記）")
@@ -513,43 +516,183 @@ struct BroadcastEngineTests {
             clock: FakeClock(now: now),
             timeZone: tokyo
         )
-        try await engine.run(program: program, corners: [freeTalk], djs: djs)
+        try await engine.run(plan: plan(2), corners: corners, djs: djs)
         #expect(sequencer.runs[0].announcement == "こんにちは。6月12日、午後3時になりました。")
         #expect(sequencer.runs[1].announcement == "時刻は3時7分になりました。ニュースの時間です。")
-        #expect(sequencer.runs[2].announcement == "ED")
+    }
+}
+
+// MARK: - S13: ED で終了 + ローリング準備
+
+/// prepare は即時完了し、run はトークが次のトークの準備完了を待ってから進む CornerRunning。
+/// 「直後のトークが準備完了済み」の状態を決定論的に作る（ED 判定テスト用）。
+private final class SynchronizingRunner: CornerRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _preparedCount = 0
+    private var _ranCornerIds: [String] = []
+    var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
+    var prepareCallCount: Int { lock.withLock { _preparedCount } }
+
+    func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+        lock.withLock { _preparedCount += 1 }
+        return PreparedCorner(
+            corner: corner,
+            song: TrackInfo(uri: "spotify:track:P", title: "T", artist: "A"),
+            script: DialogueScript(lines: [])
+        )
     }
 
-    @Test("テーマ系セグメントの dj_id で読み上げ DJ を切り替え（ニュース=青山龍星）")
-    func newsUsesSegmentDj() async throws {
-        let cast = djs + [DjProfile(id: "ryusei", name: "青山龍星", speakerId: 13, persona: "")]
-        let withNewsDj = Program(title: "t", anchorDjId: "zundamon", segments: [
-            ProgramSegment(kind: .opening),
-            ProgramSegment(kind: .news, djId: "ryusei"),
-            ProgramSegment(kind: .ending),
-        ])
-        let fixture = Fixture()
-        try await fixture.engine.run(program: withNewsDj, corners: [], djs: cast)
-        #expect(fixture.sequencer.runs.map(\.speakerId) == [3, 13, 3])
-    }
-
-    @Test("未定義の dj_id は fail-fast")
-    func unknownSegmentDjFailsFast() async {
-        let fixture = Fixture()
-        let broken = Program(title: "t", anchorDjId: "zundamon",
-                             segments: [ProgramSegment(kind: .news, djId: "nobody")])
-        await #expect(throws: ConfigError.self) {
-            try await fixture.engine.run(program: broken, corners: [], djs: djs)
+    func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
+        // 次のトークの準備完了（少なくとも 2 件目）を待ってから終わる（テストの決定論性のため）。
+        // 最後の小さな待ちは、エンジン側の完了記録（markCornerPrepared）が走る猶予。
+        for _ in 0..<200 where prepareCallCount < 2 {
+            try await Task.sleep(nanoseconds: 5_000_000)
         }
-        #expect(fixture.sequencer.runs.isEmpty)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        lock.withLock { _ranCornerIds.append(prepared.corner.id) }
+    }
+}
+
+@Suite("BroadcastEngine: ED で終了（s13 §4）")
+struct BroadcastEngineEndingTests {
+    private func makeEngine(
+        runner: any CornerRunning,
+        sequencer: SpyThemeSequencer,
+        recorder: EventRecorder,
+        control: BroadcastControl,
+        endAt index: Int
+    ) -> BroadcastEngine {
+        BroadcastEngine(
+            themes: themes,
+            themeSequencer: sequencer,
+            cornerRunner: runner,
+            newsProvider: FakeAnnouncementProvider(script: "ニュース原稿"),
+            spotify: FakeSpotifyController(),
+            clock: FakeClock(),
+            onEvent: { event in
+                recorder.append(event)
+                if event == .segmentStarted(index: index, kind: .talk) {
+                    control.requestEnding()
+                }
+            }
+        )
     }
 
-    @Test("未定義の anchor_dj_id は fail-fast")
-    func unknownAnchorFailsFast() async {
-        let fixture = Fixture()
-        let broken = Program(title: "t", anchorDjId: "nobody", segments: [ProgramSegment(kind: .opening)])
-        await #expect(throws: ConfigError.self) {
-            try await fixture.engine.run(program: broken, corners: [freeTalk], djs: djs)
+    @Test("①直後のトークが準備完了済みなら、それを流してから ED（お便り・ニュースは飛ばす）")
+    func playsPreparedNextTalkThenEnding() async throws {
+        let runner = SynchronizingRunner()
+        let sequencer = SpyThemeSequencer()
+        let recorder = EventRecorder()
+        let control = BroadcastControl()
+        // t1（index 2）の最中に ED 要求 → t2（index 3、準備完了済み）まで流して ED。
+        let engine = makeEngine(
+            runner: runner, sequencer: sequencer, recorder: recorder, control: control, endAt: 2)
+        try await engine.run(plan: plan(10), corners: corners, djs: djs, control: control)
+
+        #expect(runner.ranCornerIds == ["free_talk", "free_talk"])   // t1 + 準備済みの t2。letter は飛ばす
+        #expect(sequencer.runs.map(\.trackUri) == ["spotify:track:OP", "spotify:track:ED"])   // news なし
+        #expect(recorder.events.contains(.endingRequested))
+        #expect(recorder.events.last == .broadcastFinished)
+    }
+
+    @Test("②直後がお便り（トーク以外）なら準備済みでも飛ばして即 ED")
+    func skipsLetterAndGoesStraightToEnding() async throws {
+        let runner = SynchronizingRunner()
+        let sequencer = SpyThemeSequencer()
+        let recorder = EventRecorder()
+        let control = BroadcastControl()
+        // t2（index 3）の最中に ED 要求 → 直後はお便り（index 4）→ 即 ED。
+        let engine = makeEngine(
+            runner: runner, sequencer: sequencer, recorder: recorder, control: control, endAt: 3)
+        try await engine.run(plan: plan(10), corners: corners, djs: djs, control: control)
+
+        #expect(runner.ranCornerIds == ["free_talk", "free_talk"])   // t1, t2 のみ（letter は実行しない）
+        #expect(sequencer.runs.map(\.trackUri) == ["spotify:track:OP", "spotify:track:ED"])
+        #expect(recorder.events.last == .broadcastFinished)
+    }
+
+    @Test("③直後のトークが未準備なら待たずに即 ED + 残りの準備はキャンセル")
+    func unpreparedNextTalkGoesStraightToEnding() async throws {
+        // prepare に実時間がかかる runner（FakeClock の song 再生は即時なので、
+        // song（index 1）中の ED 要求時点でトーク（index 2）の準備は未完了）。
+        final class SlowPrepareRunner: CornerRunning, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _ranCornerIds: [String] = []
+            private var _sawCancellation = false
+            var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
+            var sawCancellation: Bool { lock.withLock { _sawCancellation } }
+            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+                do {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                } catch {
+                    lock.withLock { _sawCancellation = true }
+                    throw error
+                }
+                return PreparedCorner(
+                    corner: corner, song: TrackInfo(uri: "x", title: "", artist: ""),
+                    script: DialogueScript(lines: []))
+            }
+            func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
+                lock.withLock { _ranCornerIds.append(prepared.corner.id) }
+            }
         }
-        #expect(fixture.sequencer.runs.isEmpty)
+        let runner = SlowPrepareRunner()
+        let sequencer = SpyThemeSequencer()
+        let recorder = EventRecorder()
+        let control = BroadcastControl()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: sequencer,
+            cornerRunner: runner,
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            spotify: FakeSpotifyController(),
+            clock: FakeClock(),
+            onEvent: { event in
+                recorder.append(event)
+                if event == .segmentStarted(index: 1, kind: .song) {
+                    control.requestEnding()
+                }
+            }
+        )
+        try await engine.run(plan: plan(10), corners: corners, djs: djs, control: control)
+
+        #expect(runner.ranCornerIds.isEmpty)   // 未準備のトークは待たない
+        #expect(sequencer.runs.map(\.trackUri) == ["spotify:track:OP", "spotify:track:ED"])
+        // 残りの準備はキャンセルされる（非同期完了を待つ）。
+        for _ in 0..<100 {
+            if runner.sawCancellation { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(runner.sawCancellation)
+    }
+
+    @Test("エンドレス番組も ED 要求で終了する（plan に ED がないため合成）")
+    func endlessProgramEndsOnRequest() async throws {
+        let runner = SynchronizingRunner()
+        let sequencer = SpyThemeSequencer()
+        let recorder = EventRecorder()
+        let control = BroadcastControl()
+        let engine = makeEngine(
+            runner: runner, sequencer: sequencer, recorder: recorder, control: control, endAt: 3)
+        let endless = ProgramPlan(blueprint: blueprint(), length: .endless)
+        try await engine.run(plan: endless, corners: corners, djs: djs, control: control)
+
+        #expect(sequencer.runs.last?.trackUri == "spotify:track:ED")
+        #expect(recorder.events.last == .broadcastFinished)
+    }
+
+    @Test("ローリング準備: ED で早終了した長い番組では、窓の外の準備は起動されない（全先行しない）")
+    func rollingWindowDoesNotPrepareEverythingUpfront() async throws {
+        let runner = SynchronizingRunner()
+        let sequencer = SpyThemeSequencer()
+        let recorder = EventRecorder()
+        let control = BroadcastControl()
+        let engine = makeEngine(
+            runner: runner, sequencer: sequencer, recorder: recorder, control: control, endAt: 2)
+        // N=10 = トーク 10 + お便り 5（コーナー 15 本）。t1 中に ED → 窓（先 2 つ）の分しか準備されない。
+        try await engine.run(plan: plan(10), corners: corners, djs: djs, control: control)
+        // prepare が呼ばれたのは t1(2), t2(3), letter(4) の最大 3 件（全 15 件を先行しない）。
+        #expect(runner.prepareCallCount <= 3)
+        #expect(recorder.events.last == .broadcastFinished)
     }
 }

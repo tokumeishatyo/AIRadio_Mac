@@ -2,78 +2,107 @@ import Foundation
 import Yams
 import AIRadioCore
 
-/// `config/program.yaml` のローダ（番組フォーマット）。
+/// `config/program.yaml` のローダ（v2: 部品宣言。セグメント列はここから生成する、仕様 s13 §6）。
 public enum ProgramConfigLoader {
     private struct File: Decodable {
         struct ProgramSection: Decodable {
-            struct Segment: Decodable {
-                let type: String?
-                let corner_id: String?
+            struct Opening: Decodable {
                 let critical: Bool?
-                let dj_id: String?
+            }
+            struct Song: Decodable {
                 let song_prompt_hint: String?
                 let fallback_track_uri: String?
                 let volume: Int?
                 let play_seconds: Int?
             }
+            struct Talk: Decodable {
+                let corner_id: String?
+            }
+            struct News: Decodable {
+                let dj_id: String?
+            }
             let title: String?
             let anchor_dj_id: String?
-            let segments: [Segment]?
+            let default_length: LengthValue?
+            let opening: Opening?
+            let song: Song?
+            let talk: Talk?
+            let letter: Talk?
+            let news: News?
         }
         let program: ProgramSection?
     }
 
-    public static func load(yaml: String) throws -> Program {
-        let file = try YAMLDecoder().decode(File.self, from: yaml)
+    /// `default_length` の値（整数 `10` / 文字列 `"10"` / `endless` を受ける）。
+    private struct LengthValue: Decodable {
+        let length: ProgramLength
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let count = try? container.decode(Int.self) {
+                guard count >= 1 else {
+                    throw ConfigError.missingField("program.default_length は 1 以上（または endless）: \(count)")
+                }
+                length = .corners(count)
+                return
+            }
+            if let raw = try? container.decode(String.self),
+               let parsed = ProgramLength(rawValue: raw) {
+                if case .corners(let count) = parsed, count < 1 {
+                    throw ConfigError.missingField("program.default_length は 1 以上（または endless）: \(raw)")
+                }
+                length = parsed
+                return
+            }
+            throw ConfigError.missingField("program.default_length が不正（数値または endless）")
+        }
+    }
+
+    public static func load(yaml: String) throws -> ProgramBlueprint {
+        let file: File
+        do {
+            file = try YAMLDecoder().decode(File.self, from: yaml)
+        } catch let error as ConfigError {
+            throw error
+        } catch {
+            throw ConfigError.missingField("program.yaml を解釈できません: \(error)")
+        }
         guard let program = file.program else {
             throw ConfigError.missingField("program")
         }
         guard let anchorDjId = program.anchor_dj_id, !anchorDjId.isEmpty else {
             throw ConfigError.missingField("program.anchor_dj_id")
         }
-        guard let segments = program.segments, !segments.isEmpty else {
-            throw ConfigError.missingField("program.segments")
+        guard let song = program.song else {
+            throw ConfigError.missingField("program.song")
         }
-        let parsed = try segments.enumerated().map { index, segment -> ProgramSegment in
-            guard let raw = segment.type, let kind = SegmentKind(rawValue: raw) else {
-                throw ConfigError.missingField(
-                    "program.segments[\(index)].type が不正: \(segment.type ?? "(なし)")")
-            }
-            switch kind {
-            case .talk:
-                guard let cornerId = segment.corner_id, !cornerId.isEmpty else {
-                    throw ConfigError.missingField("program.segments[\(index)].corner_id (talk)")
-                }
-                return ProgramSegment(
-                    kind: kind, cornerId: cornerId,
-                    critical: segment.critical ?? false, djId: segment.dj_id
-                )
-            case .song:
-                guard let fallback = segment.fallback_track_uri, !fallback.isEmpty else {
-                    throw ConfigError.missingField("program.segments[\(index)].fallback_track_uri (song)")
-                }
-                return ProgramSegment(
-                    kind: kind,
-                    critical: segment.critical ?? false,
-                    song: SongSegmentSpec(
-                        promptHint: segment.song_prompt_hint ?? "",
-                        fallbackTrackUri: SpotifyURI.normalizeTrack(fallback),
-                        volume: segment.volume ?? 100,
-                        playSeconds: segment.play_seconds ?? 0
-                    )
-                )
-            default:
-                return ProgramSegment(kind: kind, critical: segment.critical ?? false, djId: segment.dj_id)
-            }
+        guard let fallback = song.fallback_track_uri, !fallback.isEmpty else {
+            throw ConfigError.missingField("program.song.fallback_track_uri")
         }
-        return Program(
+        guard let talkCornerId = program.talk?.corner_id, !talkCornerId.isEmpty else {
+            throw ConfigError.missingField("program.talk.corner_id")
+        }
+        guard let letterCornerId = program.letter?.corner_id, !letterCornerId.isEmpty else {
+            throw ConfigError.missingField("program.letter.corner_id")
+        }
+        return ProgramBlueprint(
             title: program.title ?? "ケイラボAIラジオ",
             anchorDjId: anchorDjId,
-            segments: parsed
+            defaultLength: program.default_length?.length ?? .corners(10),
+            openingCritical: program.opening?.critical ?? true,
+            song: SongSegmentSpec(
+                promptHint: song.song_prompt_hint ?? "",
+                fallbackTrackUri: SpotifyURI.normalizeTrack(fallback),
+                volume: song.volume ?? 100,
+                playSeconds: song.play_seconds ?? 0
+            ),
+            talkCornerId: talkCornerId,
+            letterCornerId: letterCornerId,
+            newsDjId: program.news?.dj_id
         )
     }
 
-    public static func load(path: String) throws -> Program {
+    public static func load(path: String) throws -> ProgramBlueprint {
         let yaml = try String(contentsOfFile: path, encoding: .utf8)
         return try load(yaml: yaml)
     }

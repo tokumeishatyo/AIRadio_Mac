@@ -3,130 +3,106 @@ import Testing
 import AIRadioCore
 @testable import AIRadioInfra
 
-@Suite("ProgramConfigLoader")
+private let fullYaml = """
+program:
+  title: "ケイラボAIラジオ"
+  anchor_dj_id: zundamon
+  default_length: 10
+  opening:
+    critical: true
+  song:
+    song_prompt_hint: "幕開けの曲"
+    fallback_track_uri: "https://open.spotify.com/track/5jsqaNOAbeBG5QYL7JpySJ?si=x"
+    volume: 100
+    play_seconds: 0
+  talk:
+    corner_id: free_talk
+  letter:
+    corner_id: letter
+  news:
+    dj_id: ryusei
+"""
+
+@Suite("ProgramConfigLoader（v2 部品宣言、s13 §6）")
 struct ProgramConfigLoaderTests {
-    @Test("番組フォーマットを読み込む")
-    func loadsProgram() throws {
-        let yaml = """
-        program:
-          title: "ケイラボAIラジオ"
-          anchor_dj_id: zundamon
-          segments:
-            - type: opening
-            - type: talk
-              corner_id: free_talk
-            - type: news
-            - type: ending
-        """
-        let program = try ProgramConfigLoader.load(yaml: yaml)
-        #expect(program == Program(
+    @Test("部品宣言を読み込む（URI 正規化込み）")
+    func loadsBlueprint() throws {
+        let blueprint = try ProgramConfigLoader.load(yaml: fullYaml)
+        #expect(blueprint == ProgramBlueprint(
             title: "ケイラボAIラジオ",
             anchorDjId: "zundamon",
-            segments: [
-                ProgramSegment(kind: .opening),
-                ProgramSegment(kind: .talk, cornerId: "free_talk"),
-                ProgramSegment(kind: .news),
-                ProgramSegment(kind: .ending),
-            ]
+            defaultLength: .corners(10),
+            openingCritical: true,
+            song: SongSegmentSpec(
+                promptHint: "幕開けの曲",
+                fallbackTrackUri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ",
+                volume: 100,
+                playSeconds: 0
+            ),
+            talkCornerId: "free_talk",
+            letterCornerId: "letter",
+            newsDjId: "ryusei"
         ))
     }
 
-    @Test("song セグメントを読み込む（URI 正規化 + 既定値）")
-    func loadsSongSegment() throws {
-        let yaml = """
-        program:
-          anchor_dj_id: zundamon
-          segments:
-            - type: song
-              song_prompt_hint: "幕開けの曲"
-              fallback_track_uri: "https://open.spotify.com/track/5jsqaNOAbeBG5QYL7JpySJ?si=x"
-        """
-        let segment = try ProgramConfigLoader.load(yaml: yaml).segments[0]
-        #expect(segment.kind == .song)
-        #expect(segment.song == SongSegmentSpec(
-            promptHint: "幕開けの曲",
-            fallbackTrackUri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ",
-            volume: 100,
-            playSeconds: 0
-        ))
+    @Test("default_length: endless / 文字列の数値 / 省略時 10")
+    func parsesDefaultLength() throws {
+        let endless = fullYaml.replacingOccurrences(of: "default_length: 10", with: "default_length: endless")
+        #expect(try ProgramConfigLoader.load(yaml: endless).defaultLength == .endless)
+
+        let quoted = fullYaml.replacingOccurrences(of: "default_length: 10", with: "default_length: \"20\"")
+        #expect(try ProgramConfigLoader.load(yaml: quoted).defaultLength == .corners(20))
+
+        let omitted = fullYaml.replacingOccurrences(of: "  default_length: 10\n", with: "")
+        #expect(try ProgramConfigLoader.load(yaml: omitted).defaultLength == .corners(10))
     }
 
-    @Test("song の fallback_track_uri 欠落は設定エラー")
-    func songWithoutFallbackThrows() {
-        #expect(throws: ConfigError.self) {
-            _ = try ProgramConfigLoader.load(yaml: """
-            program:
-              anchor_dj_id: z
-              segments:
-                - type: song
-            """)
+    @Test("default_length の不正値（0 / 負 / 文字列）は fail-fast")
+    func invalidDefaultLengthThrows() {
+        for bad in ["default_length: 0", "default_length: -5", "default_length: short"] {
+            let yaml = fullYaml.replacingOccurrences(of: "default_length: 10", with: bad)
+            #expect(throws: ConfigError.self, "\(bad)") {
+                _ = try ProgramConfigLoader.load(yaml: yaml)
+            }
         }
     }
 
-    @Test("dj_id を読み込む（省略時 nil = anchor を使う）")
-    func loadsSegmentDjId() throws {
-        let yaml = """
+    @Test("省略可能な項目の既定値（title / opening.critical / news / song の volume 等）")
+    func defaults() throws {
+        let minimal = """
         program:
           anchor_dj_id: zundamon
-          segments:
-            - type: opening
-            - type: news
-              dj_id: ryusei
+          song:
+            fallback_track_uri: "spotify:track:X"
+          talk:
+            corner_id: free_talk
+          letter:
+            corner_id: letter
         """
-        let program = try ProgramConfigLoader.load(yaml: yaml)
-        #expect(program.segments[0].djId == nil)
-        #expect(program.segments[1].djId == "ryusei")
+        let blueprint = try ProgramConfigLoader.load(yaml: minimal)
+        #expect(blueprint.title == "ケイラボAIラジオ")
+        #expect(blueprint.openingCritical == true)
+        #expect(blueprint.newsDjId == nil)
+        #expect(blueprint.song.volume == 100)
+        #expect(blueprint.song.playSeconds == 0)
+        #expect(blueprint.defaultLength == .corners(10))
     }
 
-    @Test("critical を読み込む（省略時 false）")
-    func loadsCritical() throws {
-        let yaml = """
-        program:
-          anchor_dj_id: zundamon
-          segments:
-            - type: opening
-              critical: true
-            - type: news
-        """
-        let program = try ProgramConfigLoader.load(yaml: yaml)
-        #expect(program.segments[0].critical == true)
-        #expect(program.segments[1].critical == false)
-    }
-
-    @Test("title は省略時に既定値")
-    func defaultsTitle() throws {
-        let yaml = """
-        program:
-          anchor_dj_id: zundamon
-          segments:
-            - type: opening
-        """
-        #expect(try ProgramConfigLoader.load(yaml: yaml).title == "ケイラボAIラジオ")
-    }
-
-    @Test("anchor_dj_id / segments / talk の corner_id / 不正 type は設定エラー")
-    func invalidConfigsThrow() {
-        #expect(throws: ConfigError.self) {
-            _ = try ProgramConfigLoader.load(yaml: "program:\n  segments:\n    - type: opening\n")
-        }
-        #expect(throws: ConfigError.self) {
-            _ = try ProgramConfigLoader.load(yaml: "program:\n  anchor_dj_id: z\n  segments: []\n")
-        }
-        #expect(throws: ConfigError.self) {
-            _ = try ProgramConfigLoader.load(yaml: """
-            program:
-              anchor_dj_id: z
-              segments:
-                - type: talk
-            """)
-        }
-        #expect(throws: ConfigError.self) {
-            _ = try ProgramConfigLoader.load(yaml: """
-            program:
-              anchor_dj_id: z
-              segments:
-                - type: weather_dance
-            """)
+    @Test("必須欠落（anchor / song / fallback_track_uri / talk / letter）は設定エラー")
+    func missingRequiredFieldsThrow() {
+        let requiredRemovals = [
+            ("  anchor_dj_id: zundamon\n", ""),
+            ("  song:\n    song_prompt_hint: \"幕開けの曲\"\n    fallback_track_uri: \"https://open.spotify.com/track/5jsqaNOAbeBG5QYL7JpySJ?si=x\"\n    volume: 100\n    play_seconds: 0\n", ""),
+            ("    fallback_track_uri: \"https://open.spotify.com/track/5jsqaNOAbeBG5QYL7JpySJ?si=x\"\n", ""),
+            ("  talk:\n    corner_id: free_talk\n", ""),
+            ("  letter:\n    corner_id: letter\n", ""),
+        ]
+        for (target, replacement) in requiredRemovals {
+            let yaml = fullYaml.replacingOccurrences(of: target, with: replacement)
+            #expect(yaml != fullYaml, "置換対象が見つからない: \(target)")
+            #expect(throws: ConfigError.self) {
+                _ = try ProgramConfigLoader.load(yaml: yaml)
+            }
         }
     }
 }

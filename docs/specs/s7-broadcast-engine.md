@@ -50,6 +50,8 @@ program:
 ```
 
 - `segments` は上から順に実行。`talk` は `corner_id` 必須（欠落・未定義 id は fail-fast）。
+- `critical: true`（既定 false）のセグメントは失敗時にスキップせず**放送中止**（Windows 版踏襲）。
+  既定の番組では OP に設定（OP が失敗する状況では後続も成立しないため）。
 - `opening` / `news` / `ending` の演出・文言は既存 `config/themes.yaml` を使う（本スライスでは変更しない）。
 - `anchor_dj_id` は `djs.yaml` に存在しなければ fail-fast。
 
@@ -58,13 +60,19 @@ program:
 1. セグメントを宣言順に実行する。セグメント間に追加の無音処理は挟まない
    （各セグメントが自身の演出で開始・終了する）。
 2. **fail-tolerant**: セグメントが `CancellationError` 以外で失敗したら
-   `BroadcastEvent.segmentFailed(index:kind:code:)` を通知し、**次のセグメントへ進む**。
+   `BroadcastEvent.segmentFailed(index:kind:code:detail:)` を通知し、**次のセグメントへ進む**。
    （S6 までの「コーナー中断」がここで「スキップして放送継続」になる。）
+   ただし `critical: true` のセグメントは失敗時に放送中止（`E-RTM-SEGMENT-FAILED-001` を throw）。
 3. **キャンセル**: `CancellationError` は即時伝播。後続セグメントは実行しない。
+   Infra 層がキャンセルをドメインエラーにラップして投げた場合（取消された URLSession 等）も、
+   `Task.isCancelled` を確認してスキップと誤判定しない。
 4. **完全静寂**: 正常終了・失敗・キャンセルのいずれでも、エンジンの最後で必ず `pause()`。
    （各セグメントも自前で pause するが、エンジンでも重ねて保証する。）
+   後始末の pause は**キャンセルを継承しない Task** で送る（`pauseIgnoringCancellation()`）。
+   キャンセル済み Task 内の URLSession はリクエストを送らずに取り消すため、そのまま呼ぶと
+   pause が Spotify に届かず鳴りっぱなしになる。
 5. イベント: `segmentStarted(index:kind:)` / `segmentFinished(index:kind:)` /
-   `segmentFailed(index:kind:code:)` / `broadcastFinished`。
+   `segmentFailed(index:kind:code:detail:)` / `broadcastFinished`。
 
 ## 5. エラーコード（追記）
 | コード | 発生条件 | 扱い |

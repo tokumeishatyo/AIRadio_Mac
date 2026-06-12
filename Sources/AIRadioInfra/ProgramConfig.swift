@@ -9,6 +9,7 @@ public enum ProgramConfigLoader {
             struct Segment: Decodable {
                 let type: String?
                 let corner_id: String?
+                let critical: Bool?
             }
             let title: String?
             let anchor_dj_id: String?
@@ -37,9 +38,9 @@ public enum ProgramConfigLoader {
                 guard let cornerId = segment.corner_id, !cornerId.isEmpty else {
                     throw ConfigError.missingField("program.segments[\(index)].corner_id (talk)")
                 }
-                return ProgramSegment(kind: kind, cornerId: cornerId)
+                return ProgramSegment(kind: kind, cornerId: cornerId, critical: segment.critical ?? false)
             }
-            return ProgramSegment(kind: kind)
+            return ProgramSegment(kind: kind, critical: segment.critical ?? false)
         }
         return Program(
             title: program.title ?? "ケイラボAIラジオ",

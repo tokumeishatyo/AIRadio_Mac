@@ -13,10 +13,13 @@ public struct ProgramSegment: Sendable, Equatable {
     public var kind: SegmentKind
     /// `talk` のときのみ必須（corners.yaml の id を参照）。
     public var cornerId: String?
+    /// true なら失敗時にスキップせず放送を中止する（Windows 版踏襲。既定の番組では OP に設定）。
+    public var critical: Bool
 
-    public init(kind: SegmentKind, cornerId: String? = nil) {
+    public init(kind: SegmentKind, cornerId: String? = nil, critical: Bool = false) {
         self.kind = kind
         self.cornerId = cornerId
+        self.critical = critical
     }
 }
 

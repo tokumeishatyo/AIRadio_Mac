@@ -37,6 +37,15 @@ public protocol ResearchSource: Sendable {
     func fetch() async throws -> String
 }
 
+extension SpotifyController {
+    /// 後始末用 pause。キャンセル済み Task 内では URLSession がリクエストを送らずに取り消すため、
+    /// キャンセルを継承しない新しい Task で実行して確実に Spotify へ届ける（完全静寂、CLAUDE.md §3-1）。
+    public func pauseIgnoringCancellation() async {
+        let spotify = self
+        await Task { try? await spotify.pause() }.value
+    }
+}
+
 /// 会話コーナー 1 本の実行（`CornerEngine` が準拠。テストで fake 差し替え）。
 public protocol CornerRunning: Sendable {
     func run(corner: CornerTemplate, djs: [DjProfile]) async throws

@@ -65,16 +65,21 @@ public struct BroadcastEngine: Sendable {
                     }
                     // スキップして放送継続（fail-tolerant、E-RTM-SEGMENT-FAILED-001）。
                     let radioError = error as? RadioError
+                    let code = radioError?.code ?? String(describing: type(of: error))
                     onEvent?(.segmentFailed(
                         index: index,
                         kind: entry.segment.kind,
-                        code: radioError?.code ?? String(describing: type(of: error)),
+                        code: code,
                         detail: radioError?.message ?? String(describing: error)
                     ))
+                    // critical セグメント（既定の番組では OP）の失敗は放送中止。
+                    if entry.segment.critical {
+                        throw BroadcastError.segmentFailed("\(entry.segment.kind.rawValue): \(code)")
+                    }
                 }
             }
         } catch {
-            try? await spotify.pause()
+            await spotify.pauseIgnoringCancellation()
             throw error
         }
         // 各セグメントも自前で pause するが、エンジンでも重ねて完全静寂を保証する。

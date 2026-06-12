@@ -31,6 +31,21 @@ struct ProgramConfigLoaderTests {
         ))
     }
 
+    @Test("critical を読み込む（省略時 false）")
+    func loadsCritical() throws {
+        let yaml = """
+        program:
+          anchor_dj_id: zundamon
+          segments:
+            - type: opening
+              critical: true
+            - type: news
+        """
+        let program = try ProgramConfigLoader.load(yaml: yaml)
+        #expect(program.segments[0].critical == true)
+        #expect(program.segments[1].critical == false)
+    }
+
     @Test("title は省略時に既定値")
     func defaultsTitle() throws {
         let yaml = """

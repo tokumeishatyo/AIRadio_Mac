@@ -30,7 +30,7 @@ public struct ThemeSequencer: ThemeSequencing {
             try await sequence(theme: theme, announcement: announcement, speakerId: speakerId)
         } catch {
             // 完全静寂（§3-1）: エラー / キャンセルでも必ず BGM を止める。
-            try? await spotify.pause()
+            await spotify.pauseIgnoringCancellation()
             throw error
         }
         try await spotify.pause()

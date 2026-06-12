@@ -144,6 +144,79 @@ struct BroadcastEngineTests {
         #expect(spotify.events.contains(.pause))
     }
 
+    @Test("critical セグメントの失敗は放送中止（スキップしない、Windows 版踏襲）")
+    func criticalSegmentFailureAbortsBroadcast() async {
+        struct FailingSequencer: ThemeSequencing {
+            func run(theme: ThemeConfig, announcement: String, speakerId: Int) async throws {
+                throw SpotifyError.authFailed("token expired")
+            }
+        }
+        let spotify = FakeSpotifyController()
+        let recorder = EventRecorder()
+        let cornerRunner = FakeCornerRunner()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: FailingSequencer(),
+            cornerRunner: cornerRunner,
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            spotify: spotify,
+            onEvent: { recorder.append($0) }
+        )
+        let criticalProgram = Program(title: "t", anchorDjId: "zundamon", segments: [
+            ProgramSegment(kind: .opening, critical: true),
+            ProgramSegment(kind: .talk, cornerId: "free_talk"),
+        ])
+        await #expect(throws: BroadcastError.self) {
+            try await engine.run(program: criticalProgram, corners: [freeTalk], djs: djs)
+        }
+        // OP 失敗で中止: talk には進まず、失敗イベントは通知され、pause で静寂。
+        #expect(cornerRunner.ranCornerIds.isEmpty)
+        #expect(recorder.events.contains(
+            .segmentFailed(index: 0, kind: .opening, code: "E-SPT-AUTH-FAILED-001",
+                           detail: SpotifyError.authFailed("token expired").message)))
+        #expect(!recorder.events.contains(.broadcastFinished))
+        #expect(spotify.events.contains(.pause))
+    }
+
+    @Test("キャンセル中でも後始末の pause が実行される（キャンセル非継承の Task で送る）")
+    func cleanupPauseSurvivesCancellation() async {
+        // キャンセル済み Task 内の URLSession はリクエストを送らない問題の再発防止。
+        // pause が「キャンセルされていない文脈」で呼ばれることを検証する。
+        final class CancellationSensingSpotify: SpotifyController, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _pauseCancelledFlags: [Bool] = []
+            var pauseCancelledFlags: [Bool] { lock.withLock { _pauseCancelledFlags } }
+            func play(uri: String) async throws {}
+            func pause() async throws {
+                let cancelled = Task.isCancelled
+                lock.withLock { _pauseCancelledFlags.append(cancelled) }
+            }
+            func setVolume(_ percent: Int) async throws {}
+            func seek(toSeconds seconds: Int) async throws {}
+            func playerState() async throws -> PlayerState { PlayerState(state: .playing) }
+            func currentTrackDurationSeconds() async throws -> Double { 0 }
+        }
+        struct SelfCancellingRunner: CornerRunning {
+            func run(corner: CornerTemplate, djs: [DjProfile]) async throws {
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw CancellationError()
+            }
+        }
+        let spotify = CancellationSensingSpotify()
+        let engine = BroadcastEngine(
+            themes: themes,
+            themeSequencer: SpyThemeSequencer(),
+            cornerRunner: SelfCancellingRunner(),
+            newsProvider: FakeAnnouncementProvider(script: "x"),
+            spotify: spotify
+        )
+        await #expect(throws: CancellationError.self) {
+            try await engine.run(program: program, corners: [freeTalk], djs: djs)
+        }
+        #expect(!spotify.pauseCancelledFlags.isEmpty)
+        #expect(spotify.pauseCancelledFlags.allSatisfy { $0 == false })
+    }
+
     @Test("未定義の corner_id は fail-fast（音を出す前に設定エラー）")
     func unknownCornerIdFailsFast() async {
         let fixture = Fixture()

@@ -18,7 +18,7 @@ public struct VoicevoxTTS: TTSBackend {
     public func synthesize(text: String, speakerId: Int) async throws -> Data {
         do {
             let queryURL = makeURL("audio_query", [
-                URLQueryItem(name: "text", value: text),
+                URLQueryItem(name: "text", value: Self.normalizeForSpeech(text)),
                 URLQueryItem(name: "speaker", value: String(speakerId)),
             ])
             let query = try await http.post(url: queryURL, body: nil, headers: [:])
@@ -39,6 +39,14 @@ public struct VoicevoxTTS: TTSBackend {
         } catch {
             throw TtsError.synthesisFailed(String(describing: error))
         }
+    }
+
+    /// 発話前のテキスト正規化。VOICEVOX は波ダッシュ「〜」(U+301C) / 全角チルダ「～」(U+FF5E) を
+    /// 伸ばす音として読まず区切ってしまう（例: 「あ〜し」→「あ し」）。長音「ー」(U+30FC) に置換して
+    /// 自然に伸ばす（つむぎのギャル口調などの伸ばし音対策、s13.5 ライブ調整）。
+    static func normalizeForSpeech(_ text: String) -> String {
+        text.replacingOccurrences(of: "\u{301C}", with: "\u{30FC}")
+            .replacingOccurrences(of: "\u{FF5E}", with: "\u{30FC}")
     }
 
     /// audio_query の結果 JSON に話速（speedScale）を適用する。標準速（1.0）なら無加工で返す。

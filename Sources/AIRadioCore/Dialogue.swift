@@ -48,6 +48,24 @@ public enum CornerFormat: String, Sendable, Equatable {
     case letter
 }
 
+/// コーナー準備時に番組側（`BroadcastEngine`）から渡す実行コンテキスト（仕様 s13.5 §7）。
+/// その日の編成・冒頭挨拶・時報リード文を台本／発話に反映するための情報。
+public struct CornerContext: Sendable, Equatable {
+    /// その日の出演者（順序付き・先頭＝メイン）。空なら `CornerTemplate.djIds` を使う。
+    public var castDjIds: [String]
+    /// 冒頭コーナーのみ非 nil（時刻連動の挨拶語）。非 nil＝挨拶＋出演者紹介、nil＝挨拶抑制で即本題。
+    public var greeting: String?
+    /// 本編前に読み上げる時報リード文テンプレート（時刻プレースホルダを含む、発話直前に展開）。
+    /// nil／空なら頭出しなし（冒頭コーナーは nil）。
+    public var leadIn: String?
+
+    public init(castDjIds: [String] = [], greeting: String? = nil, leadIn: String? = nil) {
+        self.castDjIds = castDjIds
+        self.greeting = greeting
+        self.leadIn = leadIn
+    }
+}
+
 /// コーナーのテンプレート（`config/corners.yaml`）。
 /// 基本パターン: テーマについて DJ 二人が会話し、最後に一曲かける。
 public struct CornerTemplate: Sendable, Equatable {
@@ -65,6 +83,9 @@ public struct CornerTemplate: Sendable, Equatable {
     public var volume: Int
     /// 締めの曲を頭から何秒かけるか。0 = 曲の長さぶんフル再生。
     public var playSeconds: Int
+    /// 本編前に読み上げる時報リード文テンプレート（時刻プレースホルダを含む。空＝頭出しなし。仕様 s13.5 §5）。
+    /// 冒頭コーナーでは番組側が使わない（挨拶ダイアログが頭になるため）。
+    public var leadIn: String
 
     public init(
         id: String,
@@ -78,7 +99,8 @@ public struct CornerTemplate: Sendable, Equatable {
         songPromptHint: String = "",
         fallbackTrackUri: String,
         volume: Int = 85,
-        playSeconds: Int = 0
+        playSeconds: Int = 0,
+        leadIn: String = ""
     ) {
         self.id = id
         self.title = title
@@ -92,6 +114,7 @@ public struct CornerTemplate: Sendable, Equatable {
         self.fallbackTrackUri = fallbackTrackUri
         self.volume = volume
         self.playSeconds = playSeconds
+        self.leadIn = leadIn
     }
 
     /// 台本の目標文字数（5 分 × 320 字/分 ≒ 1600 字）。

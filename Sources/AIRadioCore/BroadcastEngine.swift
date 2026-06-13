@@ -79,12 +79,26 @@ public struct BroadcastEngine: Sendable {
                 throw ConfigError.missingField("program.news.dj_id に未定義の DJ: \(newsDjId)")
             }
         }
+        // その日の編成（先頭＝メイン）を解決（仕様 s13.5 §2）。空・未定義 id は fail-fast。
+        let castDjIds = plan.blueprint.weeklyCast.djIds(for: clock.now, timeZone: timeZone)
+        guard !castDjIds.isEmpty else {
+            throw ConfigError.missingField("weekly_cast: 本日（曜日）の編成が定義されていません")
+        }
+        let cast = try castDjIds.map { id -> DjProfile in
+            guard let dj = djs.first(where: { $0.id == id }) else {
+                throw ConfigError.missingField("weekly_cast に未定義の DJ: \(id)")
+            }
+            return dj
+        }
+        let main = cast[0]
 
         // 準備 Task はエンジンのキャンセルを継承しない（非構造化）ため、停止時に明示キャンセルする。
         let ledger = PreparationLedger()
         try await withTaskCancellationHandler {
             defer { ledger.cancelAll() }
-            try await broadcast(plan: plan, corners: corners, djs: djs, anchor: anchor, control: control, ledger: ledger)
+            try await broadcast(
+                plan: plan, corners: corners, djs: djs,
+                cast: cast, main: main, anchor: anchor, control: control, ledger: ledger)
         } onCancel: {
             ledger.cancelAll()
         }
@@ -96,10 +110,18 @@ public struct BroadcastEngine: Sendable {
         plan: ProgramPlan,
         corners: [CornerTemplate],
         djs: [DjProfile],
+        cast: [DjProfile],
+        main: DjProfile,
         anchor: DjProfile,
         control: BroadcastControl?,
         ledger: PreparationLedger
     ) async throws {
+        let castDjIds = cast.map(\.id)
+        // 冒頭挨拶を付ける「番組最初のトーク」セグメント index（通常 2）。N=0 等で無ければ nil。
+        let firstTalkIndex = Self.firstTalkIndex(in: plan)
+        // 冒頭コーナーの時刻連動の挨拶語（準備時点で解決。再生まで数分なので時間帯ズレはほぼ無い）。
+        let greeting = TimePhrases.values(date: clock.now, greetings: themes.greetings, timeZone: timeZone)["greeting"]
+
         // ローリング準備の起動（単一消費者なので進捗はローカル変数で追う）。
         var preparationStartedThrough = -1
         func ensurePrepared(through target: Int) {
@@ -107,7 +129,10 @@ public struct BroadcastEngine: Sendable {
                 preparationStartedThrough += 1
                 let index = preparationStartedThrough
                 guard let segment = plan.segment(at: index) else { return }
-                startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, ledger: ledger)
+                let context = cornerContext(
+                    for: segment, at: index, corners: corners,
+                    castDjIds: castDjIds, firstTalkIndex: firstTalkIndex, greeting: greeting)
+                startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, context: context, ledger: ledger)
             }
         }
 
@@ -127,7 +152,7 @@ public struct BroadcastEngine: Sendable {
             while let segment = plan.segment(at: index) {
                 try Task.checkCancellation()
                 ensurePrepared(through: index + Self.preparationWindow)
-                try await runSegment(segment, at: index, djs: djs, anchor: anchor, extraValues: extraValues, ledger: ledger)
+                try await runSegment(segment, at: index, djs: djs, cast: cast, main: main, anchor: anchor, extraValues: extraValues, ledger: ledger)
                 ledger.discard(index)
 
                 // 「ED で終了」: 直後のトーク（free_talk）が準備完了済みならそれだけ流し、
@@ -140,7 +165,7 @@ public struct BroadcastEngine: Sendable {
                        next.cornerId == plan.blueprint.talkCornerId,
                        ledger.isCornerPrepared(at: edIndex) {
                         ledger.cancelAll(keeping: edIndex)   // 窓の外を捨てる
-                        try await runSegment(next, at: edIndex, djs: djs, anchor: anchor, extraValues: extraValues, ledger: ledger)
+                        try await runSegment(next, at: edIndex, djs: djs, cast: cast, main: main, anchor: anchor, extraValues: extraValues, ledger: ledger)
                         ledger.discard(edIndex)
                         edIndex += 1
                     } else {
@@ -149,13 +174,13 @@ public struct BroadcastEngine: Sendable {
                     // ED を流して終了（エンドレスは plan に ED がないため合成。有限も前倒しで同じ）。
                     try await runSegment(
                         ProgramSegment(kind: .ending), at: edIndex,
-                        djs: djs, anchor: anchor, extraValues: extraValues, ledger: ledger)
+                        djs: djs, cast: cast, main: main, anchor: anchor, extraValues: extraValues, ledger: ledger)
                     break
                 }
                 index += 1
             }
         } catch {
-            await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.theme.volume)
+            await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.staging.volume)
             throw error
         }
         // 各セグメントも自前で pause するが、エンジンでも重ねて完全静寂を保証する。
@@ -168,13 +193,15 @@ public struct BroadcastEngine: Sendable {
         _ segment: ProgramSegment,
         at index: Int,
         djs: [DjProfile],
+        cast: [DjProfile],
+        main: DjProfile,
         anchor: DjProfile,
         extraValues: [String: String],
         ledger: PreparationLedger
     ) async throws {
         onEvent?(.segmentStarted(index: index, kind: segment.kind))
         do {
-            try await perform(segment, at: index, djs: djs, anchor: anchor, extraValues: extraValues, ledger: ledger)
+            try await perform(segment, at: index, djs: djs, cast: cast, main: main, anchor: anchor, extraValues: extraValues, ledger: ledger)
             onEvent?(.segmentFinished(index: index, kind: segment.kind))
         } catch {
             // キャンセル中は Infra 層が URLSession の取消をドメインエラーにラップして
@@ -183,7 +210,7 @@ public struct BroadcastEngine: Sendable {
                 throw CancellationError()
             }
             // 失敗したセグメントが音を出したまま次へ進まないよう、ここでも静寂を保証する。
-            await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.theme.volume)
+            await spotify.pauseIgnoringCancellation(restoringVolume: themes.opening.staging.volume)
             // スキップして放送継続（fail-tolerant、E-RTM-SEGMENT-FAILED-001）。
             let radioError = error as? RadioError
             let code = radioError?.code ?? String(describing: type(of: error))
@@ -204,17 +231,22 @@ public struct BroadcastEngine: Sendable {
         _ segment: ProgramSegment,
         at index: Int,
         djs: [DjProfile],
+        cast: [DjProfile],
+        main: DjProfile,
         anchor: DjProfile,
         extraValues: [String: String],
         ledger: PreparationLedger
     ) async throws {
-        let speaker = try resolveSpeaker(segment.djId, djs: djs, anchor: anchor)
         switch segment.kind {
         case .opening:
+            // OP はその日のメインが読み、メインの口上を使う。無ければ anchor → 先頭の順（仕様 s13.5 §4）。
+            let spiel = themes.opening.spiel(preferring: main.id, fallbacks: [anchor.id]) ?? DjSpiel(announcement: "")
+            var staging = themes.opening.staging
+            staging.tagline = spiel.tagline
             try await themeSequencer.run(
-                theme: themes.opening.theme,
-                announcement: expand(themes.opening.announcement, extra: extraValues),
-                speakerId: speaker.speakerId
+                theme: staging,
+                announcement: expand(spiel.announcement, extra: extraValues),
+                speakerId: main.speakerId
             )
         case .song:
             // 選曲は先行準備済み（OP 前に確定している）。
@@ -240,19 +272,26 @@ public struct BroadcastEngine: Sendable {
             try await cornerRunner.run(prepared: prepared, djs: djs)
         case .news:
             // 原稿は出現のたびに先行準備で生成（長時間放送でニュースが更新される、s13 §3）。
+            // 読み手は専任（program.news.dj_id＝龍星。曜日替わりの影響を受けない）。
+            // 未指定はアンカー固定（原稿のペルソナも anchor 基準。メイン交代の影響を受けない）。
+            let newsSpeaker = try resolveSpeaker(segment.djId, djs: djs, fallback: anchor)
             guard let script = await ledger.newsTask(at: index)?.value else {
                 throw BroadcastError.segmentFailed("news: 準備タスクがありません（index \(index)）")
             }
             try await themeSequencer.run(
                 theme: themes.news,
                 announcement: expand(script, extra: extraValues),
-                speakerId: speaker.speakerId
+                speakerId: newsSpeaker.speakerId
             )
         case .ending:
+            // ED はその日のメインが読み、メインの口上を使う（タグラインなし）。無ければ anchor → 先頭。
+            let spiel = themes.ending.spiel(preferring: main.id, fallbacks: [anchor.id]) ?? DjSpiel(announcement: "")
+            var staging = themes.ending.staging
+            staging.tagline = spiel.tagline
             try await themeSequencer.run(
-                theme: themes.ending.theme,
-                announcement: expand(themes.ending.announcement, extra: extraValues),
-                speakerId: speaker.speakerId
+                theme: staging,
+                announcement: expand(spiel.announcement, extra: extraValues),
+                speakerId: main.speakerId
             )
         }
     }
@@ -263,6 +302,7 @@ public struct BroadcastEngine: Sendable {
         plan: ProgramPlan,
         corners: [CornerTemplate],
         djs: [DjProfile],
+        context: CornerContext,
         ledger: PreparationLedger
     ) {
         switch segment.kind {
@@ -271,7 +311,7 @@ public struct BroadcastEngine: Sendable {
             let corner = corners.first { $0.id == segment.cornerId }!
             let runner = cornerRunner
             ledger.addCorner(at: index, Task {
-                let prepared = try await runner.prepare(corner: corner, djs: djs)
+                let prepared = try await runner.prepare(corner: corner, djs: djs, context: context)
                 ledger.markCornerPrepared(at: index)
                 return prepared
             })
@@ -296,12 +336,42 @@ public struct BroadcastEngine: Sendable {
         }
     }
 
-    private func resolveSpeaker(_ djId: String?, djs: [DjProfile], anchor: DjProfile) throws -> DjProfile {
-        guard let djId else { return anchor }
+    private func resolveSpeaker(_ djId: String?, djs: [DjProfile], fallback: DjProfile) throws -> DjProfile {
+        guard let djId else { return fallback }
         guard let dj = djs.first(where: { $0.id == djId }) else {
             throw ConfigError.missingField("segment の dj_id に未定義の DJ: \(djId)")
         }
         return dj
+    }
+
+    /// 番組内で最初の talk セグメントの index（冒頭挨拶を付ける対象。通常 2。無ければ nil）。
+    private static func firstTalkIndex(in plan: ProgramPlan) -> Int? {
+        var index = 0
+        while let segment = plan.segment(at: index) {
+            if segment.kind == .talk { return index }
+            index += 1
+            if index > 8 { break }   // 安全弁: 冒頭付近にあるはず（無ければ talk なし番組）
+        }
+        return nil
+    }
+
+    /// talk セグメントの準備に渡すコンテキスト（その日の編成・冒頭挨拶 or 時報リード文）。
+    private func cornerContext(
+        for segment: ProgramSegment,
+        at index: Int,
+        corners: [CornerTemplate],
+        castDjIds: [String],
+        firstTalkIndex: Int?,
+        greeting: String?
+    ) -> CornerContext {
+        guard segment.kind == .talk else { return CornerContext() }
+        if index == firstTalkIndex {
+            // 冒頭コーナー: 時刻連動の挨拶＋出演者紹介。リード文なし。
+            return CornerContext(castDjIds: castDjIds, greeting: greeting, leadIn: nil)
+        }
+        // その他: 挨拶抑制で即本題。コーナー定義の時報リード文を頭に付ける。
+        let leadIn = corners.first { $0.id == segment.cornerId }?.leadIn
+        return CornerContext(castDjIds: castDjIds, greeting: nil, leadIn: leadIn)
     }
 
     /// 時刻プレースホルダ + 番組コンテキスト（{first_song} 等）の展開。

@@ -6,15 +6,17 @@ import AIRadioTestSupport
 private let djs = [
     DjProfile(id: "zundamon", name: "ずんだもん", speakerId: 3, persona: ""),
     DjProfile(id: "metan", name: "四国めたん", speakerId: 2, persona: ""),
+    DjProfile(id: "tsumugi", name: "春日部つむぎ", speakerId: 8, persona: ""),
+    DjProfile(id: "ryusei", name: "青山龍星", speakerId: 13, persona: ""),
 ]
 
 private let freeTalk = CornerTemplate(
     id: "free_talk", title: "フリートーク", theme: "テーマ",
-    djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK"
+    djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK", leadIn: "FT_LEAD"
 )
 private let letterCorner = CornerTemplate(
     id: "letter", title: "お便り", theme: "テーマ", format: .letter,
-    djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK"
+    djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK", leadIn: "LT_LEAD"
 )
 private let corners = [freeTalk, letterCorner]
 
@@ -22,10 +24,22 @@ private func theme(_ uri: String) -> ThemeConfig {
     ThemeConfig(tagline: nil, trackUri: uri, introSeconds: 5, volume: 85, duckedVolume: 35, outroSeconds: 10)
 }
 
+/// 全 DJ が同じ口上を持つ ThemedSegment（テスト用。どの曜日がメインでも同じ文言で検証できる）。
+private func themed(_ uri: String, _ announcement: String) -> ThemedSegment {
+    ThemedSegment(
+        staging: theme(uri),
+        byDj: [
+            "zundamon": DjSpiel(announcement: announcement),
+            "metan": DjSpiel(announcement: announcement),
+            "tsumugi": DjSpiel(announcement: announcement),
+        ]
+    )
+}
+
 private let themes = BroadcastThemes(
-    opening: ThemedAnnouncement(theme: theme("spotify:track:OP"), announcement: "オープニングです"),
+    opening: themed("spotify:track:OP", "オープニングです"),
     news: theme("spotify:track:NEWS"),
-    ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "エンディングです")
+    ending: themed("spotify:track:ED", "エンディングです")
 )
 
 private func blueprint(
@@ -131,7 +145,7 @@ struct BroadcastEngineTests {
         // Infra 層は URLSession の取消をドメインエラーにラップすることがある。
         // タスクがキャンセル済みなら、それをセグメント失敗と誤判定してはならない。
         struct SelfCancellingRunner: CornerRunning {
-            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+            func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
                 PreparedCorner(corner: corner, song: TrackInfo(uri: "x", title: "", artist: ""),
                                script: DialogueScript(lines: []))
             }
@@ -213,7 +227,7 @@ struct BroadcastEngineTests {
             func currentTrackDurationSeconds() async throws -> Double { 0 }
         }
         struct SelfCancellingRunner: CornerRunning {
-            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+            func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
                 PreparedCorner(corner: corner, song: TrackInfo(uri: "x", title: "", artist: ""),
                                script: DialogueScript(lines: []))
             }
@@ -241,11 +255,9 @@ struct BroadcastEngineTests {
     @Test("song セグメント: 先行選曲した曲を再生し、OP の {first_song} で曲振りされる")
     func songSegmentPlaysPickedTrackAndFeedsOpening() async throws {
         let songThemes = BroadcastThemes(
-            opening: ThemedAnnouncement(
-                theme: theme("spotify:track:OP"),
-                announcement: "それでは聴いてください。{first_song}。"),
+            opening: themed("spotify:track:OP", "それでは聴いてください。{first_song}。"),
             news: theme("spotify:track:NEWS"),
-            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+            ending: themed("spotify:track:ED", "ED")
         )
         let picker = FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "夜に駆ける", artist: "YOASOBI"))
         let sequencer = SpyThemeSequencer()
@@ -276,10 +288,9 @@ struct BroadcastEngineTests {
     @Test("選曲失敗・picker なしはフォールバック曲に倒し、曲振りは「本日の一曲」")
     func songSegmentFallsBackOnPickerFailure() async throws {
         let songThemes = BroadcastThemes(
-            opening: ThemedAnnouncement(
-                theme: theme("spotify:track:OP"), announcement: "{first_song}。"),
+            opening: themed("spotify:track:OP", "{first_song}。"),
             news: theme("spotify:track:NEWS"),
-            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+            ending: themed("spotify:track:ED", "ED")
         )
         let sequencer = SpyThemeSequencer()
         let spotify = FakeSpotifyController()
@@ -437,7 +448,7 @@ struct BroadcastEngineTests {
             private let lock = NSLock()
             private var _sawCancellation = false
             var sawCancellation: Bool { lock.withLock { _sawCancellation } }
-            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+            func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 10_000_000)
                 }
@@ -500,11 +511,9 @@ struct BroadcastEngineTests {
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 15, minute: 7))!
 
         let timeThemes = BroadcastThemes(
-            opening: ThemedAnnouncement(
-                theme: theme("spotify:track:OP"),
-                announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。"),
+            opening: themed("spotify:track:OP", "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。"),
             news: theme("spotify:track:NEWS"),
-            ending: ThemedAnnouncement(theme: theme("spotify:track:ED"), announcement: "ED")
+            ending: themed("spotify:track:ED", "ED")
         )
         let sequencer = SpyThemeSequencer()
         let engine = BroadcastEngine(
@@ -533,7 +542,7 @@ private final class SynchronizingRunner: CornerRunning, @unchecked Sendable {
     var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
     var prepareCallCount: Int { lock.withLock { _preparedCount } }
 
-    func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+    func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
         lock.withLock { _preparedCount += 1 }
         return PreparedCorner(
             corner: corner,
@@ -621,7 +630,7 @@ struct BroadcastEngineEndingTests {
             private var _sawCancellation = false
             var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
             var sawCancellation: Bool { lock.withLock { _sawCancellation } }
-            func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
+            func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
                 do {
                     try await Task.sleep(nanoseconds: 60_000_000_000)
                 } catch {
@@ -694,5 +703,148 @@ struct BroadcastEngineEndingTests {
         // prepare が呼ばれたのは t1(2), t2(3), letter(4) の最大 3 件（全 15 件を先行しない）。
         #expect(runner.prepareCallCount <= 3)
         #expect(recorder.events.last == .broadcastFinished)
+    }
+}
+
+// MARK: - S13.5: 曜日替わりメインDJ
+
+@Suite("BroadcastEngine: S13.5（曜日替わりメインDJ）")
+struct BroadcastEngineWeekdayTests {
+    // 曜日は timeZone 依存（Calendar.weekday）。エンジンに Asia/Tokyo を固定し、FakeClock() = epoch を
+    // どのマシンでも確実に木曜（weekday 5）に解決させる（CI/開発機のタイムゾーン差で揺れないように）。
+    private static let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+
+    private func blueprint(_ cast: WeeklyCast, newsDjId: String? = nil) -> ProgramBlueprint {
+        ProgramBlueprint(
+            title: "t", anchorDjId: "zundamon",
+            song: SongSegmentSpec(fallbackTrackUri: "spotify:track:SF", playSeconds: 45),
+            talkCornerId: "free_talk", letterCornerId: "letter",
+            newsDjId: newsDjId, weeklyCast: cast)
+    }
+
+    /// タグライン省略（announcement のみ）の per-DJ セグメント。
+    private func perDjThemed(_ uri: String, _ texts: [String: String]) -> ThemedSegment {
+        ThemedSegment(staging: theme(uri), byDj: texts.mapValues { DjSpiel(announcement: $0) })
+    }
+
+    private func engine(
+        themes t: BroadcastThemes,
+        sequencer: SpyThemeSequencer = SpyThemeSequencer(),
+        runner: any CornerRunning = FakeCornerRunner(),
+        recorder: EventRecorder? = nil
+    ) -> BroadcastEngine {
+        BroadcastEngine(
+            themes: t, themeSequencer: sequencer, cornerRunner: runner,
+            newsProvider: FakeAnnouncementProvider(script: "ニュース原稿"),
+            songPicker: FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "", artist: "")),
+            spotify: FakeSpotifyController(), clock: FakeClock(),
+            timeZone: Self.tokyo,
+            onEvent: { recorder?.append($0) })
+    }
+
+    @Test("OP/ED はその日のメインが、メインの口上＋タグラインで読む（木曜メイン＝つむぎ）")
+    func openingEndingUseMainSpiel() async throws {
+        let opening = ThemedSegment(staging: theme("spotify:track:OP"), byDj: [
+            "zundamon": DjSpiel(tagline: "ずんT", announcement: "ずんOP"),
+            "tsumugi": DjSpiel(tagline: "つむぎT", announcement: "つむぎOP"),
+        ])
+        let ending = perDjThemed("spotify:track:ED", ["zundamon": "ずんED", "tsumugi": "つむぎED"])
+        let t = BroadcastThemes(opening: opening, news: theme("spotify:track:NEWS"), ending: ending)
+        let sequencer = SpyThemeSequencer()
+        let cast = WeeklyCast(casts: [5: ["tsumugi", "zundamon"]])  // 木曜メイン＝つむぎ
+        let eng = engine(themes: t, sequencer: sequencer)
+        try await eng.run(plan: ProgramPlan(blueprint: blueprint(cast), length: .corners(1)), corners: corners, djs: djs)
+
+        let op = sequencer.runs.first { $0.trackUri == "spotify:track:OP" }
+        #expect(op?.announcement == "つむぎOP")
+        #expect(op?.speakerId == 8)        // つむぎ
+        #expect(op?.tagline == "つむぎT")    // メインのタグラインが staging に載る（s13.5 §4）
+        let ed = sequencer.runs.first { $0.trackUri == "spotify:track:ED" }
+        #expect(ed?.announcement == "つむぎED")
+        #expect(ed?.speakerId == 8)
+        #expect(ed?.tagline == nil)        // ED はタグラインなし
+    }
+
+    @Test("OP/ED: メインに口上が無ければ anchor の口上にフォールバック（先頭の任意ではない）")
+    func opEndingFallsBackToAnchorWhenMainSpielMissing() async throws {
+        // 木曜メイン＝つむぎだが、OP/ED の口上は anchor(ずん) と metan のみ定義（つむぎ欠落）。
+        let opening = perDjThemed("spotify:track:OP", ["zundamon": "ずんOP", "metan": "めたんOP"])
+        let ending = perDjThemed("spotify:track:ED", ["zundamon": "ずんED", "metan": "めたんED"])
+        let t = BroadcastThemes(opening: opening, news: theme("spotify:track:NEWS"), ending: ending)
+        let sequencer = SpyThemeSequencer()
+        let cast = WeeklyCast(casts: [5: ["tsumugi", "zundamon"]])  // メイン＝つむぎ（口上なし）、anchor＝ずん
+        let eng = engine(themes: t, sequencer: sequencer)
+        try await eng.run(plan: ProgramPlan(blueprint: blueprint(cast), length: .corners(1)), corners: corners, djs: djs)
+
+        // 口上は anchor（ずん）のものを使うが、読み手 speaker はメイン（つむぎ=8）のまま。
+        let op = sequencer.runs.first { $0.trackUri == "spotify:track:OP" }
+        #expect(op?.announcement == "ずんOP")   // めたん（任意の先頭）ではなく anchor
+        #expect(op?.speakerId == 8)
+        let ed = sequencer.runs.first { $0.trackUri == "spotify:track:ED" }
+        #expect(ed?.announcement == "ずんED")
+    }
+
+    @Test("最初のトークのみ greeting、以降のトーク・お便りは leadIn（cast は当日編成）")
+    func firstTalkGreetsOthersGetLeadIn() async throws {
+        let runner = FakeCornerRunner()
+        let cast = WeeklyCast(casts: [5: ["metan", "zundamon"]])  // 木曜メイン＝めたん
+        let eng = engine(themes: themes, runner: runner)
+        try await eng.run(plan: ProgramPlan(blueprint: blueprint(cast), length: .corners(2)), corners: corners, djs: djs)
+
+        let ctxs = runner.contexts
+        #expect(ctxs.count == 3)                                  // talk(2), talk(3), letter(4)
+        #expect(ctxs.allSatisfy { $0.castDjIds == ["metan", "zundamon"] })
+        // 冒頭（最初の talk）= greeting あり・leadIn なし。
+        #expect(ctxs[0].greeting != nil)
+        #expect(ctxs[0].leadIn == nil)
+        // 以降 = greeting なし・コーナー定義の leadIn。
+        #expect(ctxs[1].greeting == nil)
+        #expect(ctxs[1].leadIn == "FT_LEAD")
+        #expect(ctxs[2].greeting == nil)
+        #expect(ctxs[2].leadIn == "LT_LEAD")
+    }
+
+    @Test("ニュースの読み手は曜日に関係なく龍星固定（メイン交代の影響なし）")
+    func newsReaderStaysRyusei() async throws {
+        let sequencer = SpyThemeSequencer()
+        let cast = WeeklyCast(casts: [5: ["tsumugi", "zundamon"]])  // メイン＝つむぎ（8）
+        let eng = engine(themes: themes, sequencer: sequencer)
+        try await eng.run(
+            plan: ProgramPlan(blueprint: blueprint(cast, newsDjId: "ryusei"), length: .corners(2)),
+            corners: corners, djs: djs)
+        let news = sequencer.runs.first { $0.trackUri == "spotify:track:NEWS" }
+        #expect(news?.speakerId == 13)   // 龍星（メインのつむぎ 8 ではない）
+    }
+
+    @Test("news.dj_id 未指定時の読み手はメインではなく anchor 固定（原稿ペルソナと一致）")
+    func newsUnsetReaderFallsBackToAnchor() async throws {
+        let sequencer = SpyThemeSequencer()
+        let cast = WeeklyCast(casts: [5: ["tsumugi", "zundamon"]])  // メイン＝つむぎ（8）、anchor＝ずん（3）
+        let eng = engine(themes: themes, sequencer: sequencer)
+        try await eng.run(
+            plan: ProgramPlan(blueprint: blueprint(cast, newsDjId: nil), length: .corners(2)),
+            corners: corners, djs: djs)
+        let news = sequencer.runs.first { $0.trackUri == "spotify:track:NEWS" }
+        #expect(news?.speakerId == 3)   // anchor（ずん）。メインのつむぎ 8 ではない
+    }
+
+    @Test("weekly_cast が djs に無い DJ を指すと fail-fast（音を出す前に）")
+    func unknownCastIdFailsFast() async {
+        let sequencer = SpyThemeSequencer()
+        let cast = WeeklyCast(casts: [5: ["ghost"]])
+        let eng = engine(themes: themes, sequencer: sequencer)
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(plan: ProgramPlan(blueprint: blueprint(cast), length: .corners(1)), corners: corners, djs: djs)
+        }
+        #expect(sequencer.runs.isEmpty)
+    }
+
+    @Test("当日編成が空（その曜日が未定義）なら fail-fast")
+    func emptyDayCastFailsFast() async {
+        let cast = WeeklyCast(casts: [2: ["zundamon"]])  // 月だけ定義 → 木曜は空
+        let eng = engine(themes: themes)
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(plan: ProgramPlan(blueprint: blueprint(cast), length: .corners(1)), corners: corners, djs: djs)
+        }
     }
 }

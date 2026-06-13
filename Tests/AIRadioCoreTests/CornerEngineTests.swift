@@ -264,6 +264,84 @@ struct CornerEngineS12Tests {
     }
 }
 
+// MARK: - S13.5: cast 上書き + 時報リード文
+
+@Suite("CornerEngine: S13.5（cast 上書き・時報リード文）")
+struct CornerEngineS13_5Tests {
+    @Test("context.castDjIds が corner.djIds を上書きし、先頭＝メインとして台本プロンプトに入る")
+    func castOverrideAndMainLeads() async throws {
+        let fixture = Fixture()
+        // corner.djIds は [zundamon, metan] だが、当日 cast は [metan, zundamon]（めたんメイン）。
+        let context = CornerContext(castDjIds: ["metan", "zundamon"])
+        _ = try await fixture.engine.prepare(corner: corner(), djs: djs, context: context)
+        // 台本プロンプト（2 回目の LLM）にメイン＝四国めたんの主導指示が入る。
+        #expect(fixture.llm.requests[1].prompt.contains("メイン「四国めたん」が主導"))
+    }
+
+    @Test("時報リード文: run で発話直前に時刻展開・合成され、本編の前にメイン speaker で再生される")
+    func leadInSpokenBeforeDialogueAtSpeakTime() async throws {
+        let recorder = EventRecorder()
+        let fixture = Fixture()
+        let engine = CornerEngine(
+            llm: fixture.llm, tts: fixture.tts, audio: fixture.audio,
+            searcher: fixture.searcher, spotify: fixture.spotify, clock: fixture.clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            randomIndex: { _ in 0 },
+            onEvent: { recorder.append($0) }
+        )
+        // RecordingClock.now = epoch = 1970-01-01 09:00 JST → 午前 9 時 0 分。
+        // cast 先頭＝めたん（speaker 2）がリード文を読む。
+        let context = CornerContext(
+            castDjIds: ["metan", "zundamon"],
+            leadIn: "{ampm}{hour}時{minute}分になりました。ここからはフリートークのコーナーです。")
+        let prepared = try await engine.prepare(corner: corner(playSeconds: 60), djs: djs, context: context)
+        #expect(prepared.leadIn == "{ampm}{hour}時{minute}分になりました。ここからはフリートークのコーナーです。")
+        #expect(prepared.leadInSpeakerId == 2)  // めたん
+
+        try await engine.run(prepared: prepared, djs: djs)
+        // 本編 4 行の前にリード文 1 件 = 計 5 件。先頭がリード文（メイン speaker 2 で時刻展開済み）。
+        #expect(fixture.audio.played.count == 5)
+        #expect(fixture.audio.played[0] == Data("2:午前9時0分になりました。ここからはフリートークのコーナーです。".utf8))
+        // 展開後テキストが leadIn イベントで通知される。
+        #expect(recorder.events.contains(.leadIn("午前9時0分になりました。ここからはフリートークのコーナーです。")))
+    }
+
+    @Test("リード文なし（既定）なら本編のみ再生（冒頭コーナー相当）")
+    func noLeadInPlaysDialogueOnly() async throws {
+        let fixture = Fixture()
+        let prepared = try await fixture.engine.prepare(corner: corner(playSeconds: 60), djs: djs)
+        try await fixture.engine.run(prepared: prepared, djs: djs)
+        #expect(prepared.leadIn == nil)
+        #expect(fixture.audio.played.count == 4)  // 本編 4 行のみ
+    }
+
+    @Test("時報リード文は prepare 時ではなく run 時の時刻で展開される（発話直前・正確）")
+    func leadInUsesRunTimeNotPrepareTime() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let prepareTime = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 9, minute: 0))!
+        let runTime = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 14, minute: 30))!
+        let clock = MutableClock(now: prepareTime)
+        let recorder = EventRecorder()
+        let engine = CornerEngine(
+            llm: ScriptedLLM(responses: [candidatesResponse, scriptResponse]),
+            tts: InMemoryTTS(), audio: SpyAudioPlayer(),
+            searcher: FakeTrackSearcher(results: [TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")]),
+            spotify: FakeSpotifyController(durationSeconds: 240), clock: clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!, randomIndex: { _ in 0 },
+            onEvent: { recorder.append($0) }
+        )
+        // 準備は 9:00、本番（run）は 14:30。リード文は run 時刻で展開されるべき。
+        let context = CornerContext(castDjIds: ["metan", "zundamon"], leadIn: "{ampm}{hour}時{minute}分です。")
+        let prepared = try await engine.prepare(corner: corner(playSeconds: 60), djs: djs, context: context)
+        clock.set(runTime)
+        try await engine.run(prepared: prepared, djs: djs)
+        // run 時刻（午後2時30分）で展開。prepare 時刻（午前9時0分）ではない。
+        #expect(recorder.events.contains(.leadIn("午後2時30分です。")))
+        #expect(!recorder.events.contains(.leadIn("午前9時0分です。")))
+    }
+}
+
 private final class EventRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var _events: [CornerEvent] = []

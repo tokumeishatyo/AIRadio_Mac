@@ -105,4 +105,32 @@ struct ProgramConfigLoaderTests {
             }
         }
     }
+
+    // MARK: - weekly_cast（s13.5）
+
+    @Test("weekly_cast 省略時は既定表（WeeklyCast.standard）")
+    func weeklyCastDefaultsToStandard() throws {
+        #expect(try ProgramConfigLoader.load(yaml: fullYaml).weeklyCast == .standard)
+    }
+
+    @Test("weekly_cast を曜日名→Calendar weekday で読み込む")
+    func loadsWeeklyCast() throws {
+        let yaml = fullYaml + """
+
+          weekly_cast:
+            monday: [zundamon, metan]
+            sunday: [zundamon, metan, tsumugi]
+        """
+        let cast = try ProgramConfigLoader.load(yaml: yaml).weeklyCast
+        #expect(cast.casts[2] == ["zundamon", "metan"])             // 月=2
+        #expect(cast.casts[1] == ["zundamon", "metan", "tsumugi"])  // 日=1
+    }
+
+    @Test("不正な曜日名 / 空の編成は設定エラー")
+    func invalidWeeklyCastThrows() {
+        let badDay = fullYaml + "\n  weekly_cast:\n    someday: [zundamon]\n"
+        #expect(throws: ConfigError.self) { _ = try ProgramConfigLoader.load(yaml: badDay) }
+        let emptyDay = fullYaml + "\n  weekly_cast:\n    monday: []\n"
+        #expect(throws: ConfigError.self) { _ = try ProgramConfigLoader.load(yaml: emptyDay) }
+    }
 }

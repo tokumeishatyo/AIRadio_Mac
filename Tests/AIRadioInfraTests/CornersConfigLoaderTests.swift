@@ -29,6 +29,23 @@ struct CornersConfigLoaderTests {
         // S12: 省略時はプール空 + free_talk 形式
         #expect(corner.themePool.isEmpty)
         #expect(corner.format == .freeTalk)
+        // S13.5: lead_in 省略時は空（頭出しなし）
+        #expect(corner.leadIn.isEmpty)
+    }
+
+    @Test("lead_in（時報リード文テンプレート）を読み込む（s13.5）")
+    func loadsLeadIn() throws {
+        let yaml = """
+        corners:
+          - id: free_talk
+            title: "フリートーク"
+            theme: "テーマ"
+            lead_in: "{ampm}{hour}時{minute}分になりました。ここからはフリートークのコーナーです。"
+            dj_ids: [zundamon, metan]
+            fallback_track_uri: "spotify:track:X"
+        """
+        let corner = try CornersConfigLoader.load(yaml: yaml)[0]
+        #expect(corner.leadIn == "{ampm}{hour}時{minute}分になりました。ここからはフリートークのコーナーです。")
     }
 
     @Test("themes（テーマプール）と format: letter を読み込む（s12）")

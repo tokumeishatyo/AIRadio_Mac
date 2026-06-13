@@ -103,10 +103,19 @@ func runThemeDemo() async {
         let newsAnnouncement = await newsWeather.announcement()
         print("ニュース原稿: \(newsAnnouncement.prefix(80))…")
 
+        // OP/ED は DJ 別口上（s13.5）。デモは ずんだもん（無ければ任意）の口上を使う。
+        func themed(_ segment: ThemedSegment) -> (ThemeConfig, String) {
+            let spiel = segment.spiel(preferring: "zundamon") ?? DjSpiel(announcement: "")
+            var staging = segment.staging
+            staging.tagline = spiel.tagline
+            return (staging, spiel.announcement)
+        }
+        let (opTheme, opText) = themed(themes.opening)
+        let (edTheme, edText) = themed(themes.ending)
         let segments: [(String, ThemeConfig, String)] = [
-            ("オープニング", themes.opening.theme, themes.opening.announcement),
+            ("オープニング", opTheme, opText),
             ("ニュースと天気", themes.news.theme, newsAnnouncement),
-            ("エンディング", themes.ending.theme, themes.ending.announcement),
+            ("エンディング", edTheme, edText),
         ]
         for (name, theme, announcement) in segments {
             print("=== \(name) ===")
@@ -188,6 +197,8 @@ func runCornerDemo() async {
                     print("締めの曲（プレフライト済み）: \(label)")
                 case .scriptReady(let lineCount, let totalCharacters):
                     print("台本生成完了: \(lineCount) 行 / \(totalCharacters) 文字")
+                case .leadIn(let text):
+                    print("⏱ リード文: \(text)")
                 case .line(let line):
                     print("  \(line.djId): \(line.text)")
                 case .songStarted(let track):
@@ -272,7 +283,7 @@ func runTrackWatchDemo() async {
 
         // 1. OP の終わり方を再現: BGM を頭から数秒 → 終端 10 秒前へシーク → 自然終了 → pause
         print("--- OP 遷移の再現（BGM 終端で停止した状態を作る）---")
-        try await spotify.play(uri: themes.opening.theme.trackUri)
+        try await spotify.play(uri: themes.opening.staging.trackUri)
         try await clock.sleep(seconds: 3)
         let bgmDuration = try await spotify.currentTrackDurationSeconds()
         if bgmDuration > 10 {

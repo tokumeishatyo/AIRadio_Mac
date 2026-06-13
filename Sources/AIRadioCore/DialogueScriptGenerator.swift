@@ -18,12 +18,13 @@ public struct DialogueScriptGenerator: Sendable {
         song: TrackInfo,
         theme: String? = nil,
         dateContext: String = "",
-        letter: ListenerLetter? = nil
+        letter: ListenerLetter? = nil,
+        greeting: String? = nil
     ) async throws -> DialogueScript {
         let request = Self.makeRequest(
             corner: corner, djs: djs, song: song,
             theme: theme, dateContext: dateContext, letter: letter,
-            temperature: temperature
+            greeting: greeting, temperature: temperature
         )
         let raw = try await llm.generate(request)
         return try Self.parse(raw, djs: djs)
@@ -31,6 +32,9 @@ public struct DialogueScriptGenerator: Sendable {
 
     // MARK: - プロンプト構築
 
+    /// - Parameters:
+    ///   - djs: 出演者（**順序付き・先頭＝メイン**）。メインが主導し、他は相槌・ツッコミ・応答で返す（仕様 s13.5 §6）。
+    ///   - greeting: 冒頭コーナーのみ非 nil（時刻連動の挨拶語）。非 nil＝挨拶＋出演者紹介、nil＝挨拶抑制で即本題。
     public static func makeRequest(
         corner: CornerTemplate,
         djs: [DjProfile],
@@ -38,10 +42,12 @@ public struct DialogueScriptGenerator: Sendable {
         theme: String? = nil,
         dateContext: String = "",
         letter: ListenerLetter? = nil,
+        greeting: String? = nil,
         temperature: Double = 0.9
     ) -> LLMRequest {
         let selectedTheme = theme ?? corner.theme
         let names = djs.map(\.name).joined(separator: "」「")
+        let main = djs.first?.name ?? names
         let profiles = djs
             .map { "- \($0.name): \($0.persona)" }
             .joined(separator: "\n")
@@ -84,11 +90,17 @@ public struct DialogueScriptGenerator: Sendable {
             "セリフの合計は \(corner.targetCharacters) 文字以上、\(corner.targetCharacters * 12 / 10) 文字以内（\(corner.targetMinutes) 分程度の会話）。短すぎる台本は不可。",
             "出力は台本のみ。1 行につき 1 つのセリフを「DJ名: セリフ」の形式で書く。",
             "DJ名は「\(names)」のみ。ナレーション、ト書き、見出し、記号装飾は書かない。",
-            "二人が交互に、それぞれの口調を守って自然に会話する。",
+            "進行はメイン「\(main)」が主導し、ほかの出演者は相槌・ツッコミ・応答で自然に返す。それぞれの口調を守る。",
         ]
+        // 冒頭コーナーのみ挨拶＋出演者紹介。それ以外は挨拶・自己紹介・番組名を抑制して即本題（仕様 s13.5 §6）。
+        if let greeting {
+            constraints.append("これは番組の最初のコーナー。メイン「\(main)」がまず「\(greeting)」とリスナーに挨拶し、番組名「ケイラボAIラジオ」と本日の出演者（「\(names)」）を紹介してから本題に入る。")
+        } else {
+            constraints.append("これは番組の途中のコーナー。挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める。")
+        }
         if let letter {
-            constraints.append("最初に「ラジオネーム \(letter.radioName)さんからのお便り」と紹介し、本文をセリフとして自然に読み上げる。")
-            constraints.append("読み上げのあと、二人でお便りへの感想を話す（テーマ: \(selectedTheme)。脱線してよい）。")
+            constraints.append("メインがまず「ラジオネーム \(letter.radioName)さんからのお便り」と紹介し、本文をセリフとして自然に読み上げる。")
+            constraints.append("読み上げのあと、出演者でお便りへの感想を話す（テーマ: \(selectedTheme)。脱線してよい）。")
         }
         if !dateContext.isEmpty {
             constraints.append("季節や時候の話は、上の日付・季節に合わせる。")

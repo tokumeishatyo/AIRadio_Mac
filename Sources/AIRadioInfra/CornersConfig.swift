@@ -18,6 +18,7 @@ public enum CornersConfigLoader {
             let fallback_track_uri: String?
             let volume: Int?
             let play_seconds: Int?
+            let lead_in: String?
         }
         let corners: [Corner]?
     }
@@ -56,7 +57,8 @@ public enum CornersConfigLoader {
                 songPromptHint: corner.song_prompt_hint ?? "",
                 fallbackTrackUri: SpotifyURI.normalizeTrack(fallback),
                 volume: corner.volume ?? 85,
-                playSeconds: corner.play_seconds ?? 0
+                playSeconds: corner.play_seconds ?? 0,
+                leadIn: corner.lead_in ?? ""
             )
         }
     }

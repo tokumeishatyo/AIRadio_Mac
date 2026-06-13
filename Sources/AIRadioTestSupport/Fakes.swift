@@ -26,6 +26,18 @@ public struct FakeClock: Clock {
     public func sleep(seconds: Double) async throws { /* 即時（待たない） */ }
 }
 
+/// `now` を任意に進められる Clock（発話直前展開の時刻が prepare 時ではなく run 時かを検証する用）。
+/// sleep は即時（待たない）。`advance(by:)` または `set(_:)` で仮想時刻を動かす。
+public final class MutableClock: Clock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _now: Date
+    public init(now: Date) { _now = now }
+    public var now: Date { lock.withLock { _now } }
+    public func set(_ date: Date) { lock.withLock { _now = date } }
+    public func advance(by seconds: Double) { lock.withLock { _now = _now.addingTimeInterval(seconds) } }
+    public func sleep(seconds: Double) async throws { /* 即時（待たない） */ }
+}
+
 /// 固定ペイロードを返す ResearchSource。
 public struct FakeResearchSource: ResearchSource {
     public let payload: String
@@ -57,10 +69,13 @@ public final class SpyThemeSequencer: ThemeSequencing, @unchecked Sendable {
         public let trackUri: String
         public let announcement: String
         public let speakerId: Int
-        public init(trackUri: String, announcement: String, speakerId: Int) {
+        /// 発話直前にエンジンが load したタグライン（OP は per-DJ、ED は nil。s13.5）。
+        public let tagline: String?
+        public init(trackUri: String, announcement: String, speakerId: Int, tagline: String? = nil) {
             self.trackUri = trackUri
             self.announcement = announcement
             self.speakerId = speakerId
+            self.tagline = tagline
         }
     }
     private let lock = NSLock()
@@ -69,7 +84,9 @@ public final class SpyThemeSequencer: ThemeSequencing, @unchecked Sendable {
     public var runs: [Run] { lock.withLock { _runs } }
     public func run(theme: ThemeConfig, announcement: String, speakerId: Int) async throws {
         lock.withLock {
-            _runs.append(Run(trackUri: theme.trackUri, announcement: announcement, speakerId: speakerId))
+            _runs.append(Run(
+                trackUri: theme.trackUri, announcement: announcement,
+                speakerId: speakerId, tagline: theme.tagline))
         }
     }
 }
@@ -80,19 +97,26 @@ public final class FakeCornerRunner: CornerRunning, @unchecked Sendable {
     private var _preparedCornerIds: [String] = []
     private var _ranCornerIds: [String] = []
     private var _ranPrepared: [PreparedCorner] = []
+    private var _contexts: [CornerContext] = []
     private let errors: [String: any Error & Sendable]
     public init(errors: [String: any Error & Sendable] = [:]) { self.errors = errors }
     public var preparedCornerIds: [String] { lock.withLock { _preparedCornerIds } }
     public var ranCornerIds: [String] { lock.withLock { _ranCornerIds } }
     public var ranPrepared: [PreparedCorner] { lock.withLock { _ranPrepared } }
+    /// prepare に渡されたコンテキスト（cast / greeting / leadIn）の記録（呼び出し順）。
+    public var contexts: [CornerContext] { lock.withLock { _contexts } }
 
-    public func prepare(corner: CornerTemplate, djs: [DjProfile]) async throws -> PreparedCorner {
-        lock.withLock { _preparedCornerIds.append(corner.id) }
+    public func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext) async throws -> PreparedCorner {
+        lock.withLock { _preparedCornerIds.append(corner.id); _contexts.append(context) }
         if let error = errors[corner.id] { throw error }
+        let castIds = context.castDjIds.isEmpty ? corner.djIds : context.castDjIds
         return PreparedCorner(
             corner: corner,
             song: TrackInfo(uri: "spotify:track:PREPARED-\(corner.id)", title: "T", artist: "A"),
-            script: DialogueScript(lines: [DialogueLine(djId: corner.djIds.first ?? "", text: "準備済み")])
+            script: DialogueScript(lines: [DialogueLine(djId: castIds.first ?? "", text: "準備済み")]),
+            castDjIds: castIds,
+            leadIn: (context.leadIn?.isEmpty == false) ? context.leadIn : nil,
+            leadInSpeakerId: 0
         )
     }
 

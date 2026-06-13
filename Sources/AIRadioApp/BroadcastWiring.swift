@@ -105,9 +105,9 @@ func makeBroadcastStack(
     )
     let engine = BroadcastEngine(
         themes: BroadcastThemes(
-            opening: ThemedAnnouncement(theme: themes.opening.theme, announcement: themes.opening.announcement),
+            opening: themes.opening,        // ThemedSegment（DJ 別口上）
             news: themes.news.theme,
-            ending: ThemedAnnouncement(theme: themes.ending.theme, announcement: themes.ending.announcement),
+            ending: themes.ending,          // ThemedSegment（DJ 別口上）
             greetings: themes.greetings
         ),
         themeSequencer: ThemeSequencer(tts: tts, audio: audio, spotify: spotify, clock: clock),
@@ -140,6 +140,8 @@ func makeBroadcastStack(
         print("  締めの曲: \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
     case .scriptReady(let lineCount, let totalCharacters):
         print("  台本: \(lineCount) 行 / \(totalCharacters) 文字")
+    case .leadIn(let text):
+        print("  ⏱ リード文: \(text)")
     case .line(let line):
         print("    \(line.djId): \(line.text)")
     case .songStarted:

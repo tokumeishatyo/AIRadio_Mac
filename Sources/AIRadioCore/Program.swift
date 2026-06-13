@@ -94,6 +94,8 @@ public struct ProgramBlueprint: Sendable, Equatable {
     public var letterCornerId: String
     /// ニュースの読み上げ DJ（nil なら anchor）。
     public var newsDjId: String?
+    /// 曜日替わり編成（メイン＝先頭。仕様 s13.5 §2）。
+    public var weeklyCast: WeeklyCast
 
     public init(
         title: String,
@@ -103,7 +105,8 @@ public struct ProgramBlueprint: Sendable, Equatable {
         song: SongSegmentSpec,
         talkCornerId: String,
         letterCornerId: String,
-        newsDjId: String? = nil
+        newsDjId: String? = nil,
+        weeklyCast: WeeklyCast = .standard
     ) {
         self.title = title
         self.anchorDjId = anchorDjId
@@ -113,7 +116,41 @@ public struct ProgramBlueprint: Sendable, Equatable {
         self.talkCornerId = talkCornerId
         self.letterCornerId = letterCornerId
         self.newsDjId = newsDjId
+        self.weeklyCast = weeklyCast
     }
+}
+
+/// 曜日替わり編成（仕様 s13.5 §2）。Calendar の weekday（1=日…7=土）→ 順序付き DJ id（先頭＝メイン）。
+/// メインが OP・ED・時報リード文・トークを仕切り、以降はサブ。完全決定論（テストは固定日付で検証）。
+public struct WeeklyCast: Sendable, Equatable {
+    public var casts: [Int: [String]]
+
+    public init(casts: [Int: [String]]) {
+        self.casts = casts
+    }
+
+    /// 指定日の編成（先頭＝メイン）。未定義の曜日は空配列。
+    public func djIds(for date: Date, timeZone: TimeZone = .current) -> [String] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return casts[calendar.component(.weekday, from: date)] ?? []
+    }
+
+    /// 指定日のメイン DJ（編成の先頭）。未定義なら nil。
+    public func mainDjId(for date: Date, timeZone: TimeZone = .current) -> String? {
+        djIds(for: date, timeZone: timeZone).first
+    }
+
+    /// 仕様の確定表（`weekly_cast` 省略時の既定）。weekday: 1=日 2=月 … 7=土。
+    public static let standard = WeeklyCast(casts: [
+        1: ["zundamon", "metan", "tsumugi"],  // 日: ずんメイン 3 人運営
+        2: ["zundamon", "metan"],             // 月
+        3: ["metan", "tsumugi"],              // 火
+        4: ["tsumugi", "zundamon"],           // 水
+        5: ["zundamon", "metan"],             // 木
+        6: ["metan", "tsumugi"],              // 金
+        7: ["tsumugi", "zundamon"],           // 土
+    ])
 }
 
 /// コーナー数 N から決定論的に生成される番組（仕様 s13 §2）。
@@ -203,29 +240,53 @@ public final class BroadcastControl: @unchecked Sendable {
     }
 }
 
-/// テーマ演出 + 固定の発話文（opening / ending 用）。
-public struct ThemedAnnouncement: Sendable, Equatable {
-    public var theme: ThemeConfig
+/// DJ 別の固定口上（OP / ED。口調込み・YAML 由来で不変。仕様 s13.5 §4）。
+public struct DjSpiel: Sendable, Equatable {
+    /// BGM 前の一言（OP のみ。ED は nil）。
+    public var tagline: String?
+    /// 本文（時刻プレースホルダ `{greeting}` 等を含み、発話直前に展開される）。
     public var announcement: String
 
-    public init(theme: ThemeConfig, announcement: String) {
-        self.theme = theme
+    public init(tagline: String? = nil, announcement: String) {
+        self.tagline = tagline
         self.announcement = announcement
+    }
+}
+
+/// テーマ系セグメント（OP / ED）。BGM 演出は共有、口上は DJ 別（その日のメインのものを使う）。
+public struct ThemedSegment: Sendable, Equatable {
+    /// 共有 BGM 演出（`staging.tagline` は無視。発話直前にメインの tagline を載せる）。
+    public var staging: ThemeConfig
+    /// dj id → 固定口上。
+    public var byDj: [String: DjSpiel]
+
+    public init(staging: ThemeConfig, byDj: [String: DjSpiel]) {
+        self.staging = staging
+        self.byDj = byDj
+    }
+
+    /// メインを優先し、無ければ fallbacks の順、それも無ければ任意の 1 件を返す。
+    public func spiel(preferring djId: String, fallbacks: [String] = []) -> DjSpiel? {
+        if let spiel = byDj[djId] { return spiel }
+        for fallback in fallbacks {
+            if let spiel = byDj[fallback] { return spiel }
+        }
+        return byDj.values.first
     }
 }
 
 /// 放送で使うテーマ一式。news の原稿は実行時に `AnnouncementProviding` が生成するため演出設定のみ。
 public struct BroadcastThemes: Sendable, Equatable {
-    public var opening: ThemedAnnouncement
+    public var opening: ThemedSegment
     public var news: ThemeConfig
-    public var ending: ThemedAnnouncement
+    public var ending: ThemedSegment
     /// 時間帯挨拶（`{greeting}` プレースホルダの値、themes.yaml の `greetings:`）。
     public var greetings: Greetings
 
     public init(
-        opening: ThemedAnnouncement,
+        opening: ThemedSegment,
         news: ThemeConfig,
-        ending: ThemedAnnouncement,
+        ending: ThemedSegment,
         greetings: Greetings = Greetings()
     ) {
         self.opening = opening

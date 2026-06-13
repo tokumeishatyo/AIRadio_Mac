@@ -13,14 +13,24 @@ greetings:
 # announcement では時刻プレースホルダが使える（発話直前に展開、仕様 s8 §3）:
 #   {greeting} 時間帯挨拶 / {month}月 {day}日 / {ampm}{hour}時 = 午前/午後+NHK式12時間 /
 #   {hour12}時{minute}分 = 午前午後なしの12時間表記
+# OP / ED は DJ 別の固定口上（by_dj、口調込み・不変。仕様 s13.5 §4）。その日のメインのものを使う。
+# track_uri/intro/volume/ducked/outro の BGM 演出は共有、tagline は DJ 別。
 opening:
-  tagline: "ずんだもんの ケイラボAIラジオ"
   track_uri: "https://open.spotify.com/intl-ja/track/5jsqaNOAbeBG5QYL7JpySJ?si=5c452cc8429d4c49"
   intro_seconds: 5
   volume: 100
   ducked_volume: 35
   outro_seconds: 10
-  announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。それでは早速聴いてもらうのだ。{first_song}。"
+  by_dj:
+    zundamon:
+      tagline: "ずんだもんの ケイラボAIラジオ"
+      announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオの時間なのだ。お送りするのはずんだもんなのだ。本日もリスナーの皆さんと、ゆったりした時間を過ごしていきたいと思うのだ。なお、本番組の音声合成にはVOICEVOXを使用しているのだ。それでは早速聴いてもらうのだ。{first_song}。"
+    metan:
+      tagline: "四国めたんの ケイラボAIラジオ"
+      announcement: "{greeting}。{month}月{day}日、{ampm}{hour}時になりましたわ。ケイラボAIラジオのお時間です。お送りするのは、わたくし四国めたんですわ。本日もリスナーの皆さまと、ゆったりした時間を過ごしてまいりますわ。なお、本番組の音声合成にはVOICEVOXを使用しております。それでは早速、お聴きくださいませ。{first_song}。"
+    tsumugi:
+      tagline: "春日部つむぎの ケイラボAIラジオ"
+      announcement: "{greeting}〜。{month}月{day}日、{ampm}{hour}時になりました。ケイラボAIラジオのお時間です。お送りするのは、あ〜し、春日部つむぎでーす。今日もリスナーのみなさんと、ゆる〜く過ごしていけたらなって思ってます。あ、本番組の音声合成にはVOICEVOXを使ってるんですよ〜。それでは早速、聴いてくださいっ。{first_song}。"
 
 news:
   tagline: "ニュースと天気予報です"
@@ -31,11 +41,17 @@ news:
   outro_seconds: 10
   announcement: "本日のニュースをお伝えするのだ。これはダミーのニュース原稿なのだ。詳しい中身は後のスライスで本物のニュースに差し替える予定なのだ。続いて天気予報なのだ。今日は全国的におおむね晴れ、ところにより気まぐれな雨が降るかもしれないのだ。以上、ダミーのニュースと天気予報でした。"
 
-# ED は tagline なし（いきなり BGM）。
+# ED は tagline なし（いきなり BGM）。口上は DJ 別（その日のメインが読む）。
 ending:
   track_uri: "spotify:track:5gf9qeUJUHvhp1TkHUJ2sR"
   intro_seconds: 5
   volume: 100
   ducked_volume: 35
   outro_seconds: 10
-  announcement: "本日も最後までお聴きいただき、ありがとうございましたなのだ。また次回お会いしましょう。それでは、おやすみなさいなのだ。"
+  by_dj:
+    zundamon:
+      announcement: "本日も最後までお聴きいただき、ありがとうございましたなのだ。また次回お会いしましょう。それでは、おやすみなさいなのだ。"
+    metan:
+      announcement: "本日も最後までお聴きいただき、ありがとうございましたわ。また次回お会いしましょう。それでは、ごきげんよう。"
+    tsumugi:
+      announcement: "今日も最後まで聴いてくれて、ありがとうございましたー。またあ〜したちと会えるの、楽しみにしてますね。それじゃ、またね、ばいばーい。"

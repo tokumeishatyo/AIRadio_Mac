@@ -138,6 +138,43 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("夜に駆ける"))
         #expect(request.prompt.contains("感想"))
     }
+
+    // MARK: - S13.5: 主導/応答 + 冒頭挨拶の有無
+
+    private let threeCast = [
+        DjProfile(id: "tsumugi", name: "春日部つむぎ", speakerId: 8, persona: "あ〜し口調"),
+        DjProfile(id: "zundamon", name: "ずんだもん", speakerId: 3, persona: "なのだ口調"),
+        DjProfile(id: "metan", name: "四国めたん", speakerId: 2, persona: "ですわ口調"),
+    ]
+
+    @Test("先頭＝メインが主導し、他は相槌・ツッコミ・応答で返す指示が入る")
+    func mainLeadsInstruction() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: threeCast, song: song)
+        // cast 先頭の つむぎ がメイン。
+        #expect(request.prompt.contains("メイン「春日部つむぎ」が主導"))
+        #expect(request.prompt.contains("相槌・ツッコミ・応答"))
+    }
+
+    @Test("greeting 非 nil（冒頭）: 時刻連動の挨拶＋番組名＋出演者紹介を指示")
+    func greetingPromptForOpeningCorner() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song, greeting: "こんばんは")
+        #expect(request.prompt.contains("番組の最初のコーナー"))
+        #expect(request.prompt.contains("こんばんは"))
+        #expect(request.prompt.contains("ケイラボAIラジオ"))
+        #expect(request.prompt.contains("本日の出演者"))
+        #expect(!request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず"))
+    }
+
+    @Test("greeting nil（既定・途中）: 挨拶・自己紹介・番組名を抑制して即本題")
+    func noGreetingPromptForLaterCorner() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: djs, song: song)
+        #expect(request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める"))
+        #expect(!request.prompt.contains("番組の最初のコーナー"))
+    }
 }
 
 @Suite("DialogueScriptGenerator: 生成")

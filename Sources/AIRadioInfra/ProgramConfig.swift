@@ -29,8 +29,30 @@ public enum ProgramConfigLoader {
             let talk: Talk?
             let letter: Talk?
             let news: News?
+            let weekly_cast: [String: [String]]?
         }
         let program: ProgramSection?
+    }
+
+    /// 曜日名 → Calendar の weekday（1=日…7=土）。
+    private static let weekdayNumbers: [String: Int] = [
+        "sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
+        "thursday": 5, "friday": 6, "saturday": 7,
+    ]
+
+    private static func parseWeeklyCast(_ raw: [String: [String]]?) throws -> WeeklyCast {
+        guard let raw, !raw.isEmpty else { return .standard }
+        var casts: [Int: [String]] = [:]
+        for (day, ids) in raw {
+            guard let weekday = weekdayNumbers[day.lowercased()] else {
+                throw ConfigError.missingField("program.weekly_cast の曜日名が不正: \(day)")
+            }
+            guard !ids.isEmpty else {
+                throw ConfigError.missingField("program.weekly_cast.\(day) の編成が空です")
+            }
+            casts[weekday] = ids
+        }
+        return WeeklyCast(casts: casts)
     }
 
     /// `default_length` の値（整数 `10` / 文字列 `"10"` / `endless` を受ける）。
@@ -98,7 +120,8 @@ public enum ProgramConfigLoader {
             ),
             talkCornerId: talkCornerId,
             letterCornerId: letterCornerId,
-            newsDjId: program.news?.dj_id
+            newsDjId: program.news?.dj_id,
+            weeklyCast: try parseWeeklyCast(program.weekly_cast)
         )
     }
 

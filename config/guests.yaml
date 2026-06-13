@@ -1,0 +1,46 @@
+# ゲストコーナー（仕様 s14）のゲストプール。レギュラー（zundamon/metan/tsumugi/ryusei）以外の
+# VOICEVOX キャラから、放送開始時にランダムで 1 名選ばれる。
+# 選ばれたゲストは「本日のテーマに詳しい人」として登場する（persona に専門分野は書かない）。
+# 構造は djs.yaml と同形（id / name / speaker_id / persona）。speaker_id は VOICEVOX /speakers で実在確認済み。
+# 伸ばす音は長音符「ー」で書く（波ダッシュ「〜」は読み上げで途切れるため使わない）。
+guests:
+  - id: sora
+    name: "九州そら"
+    speaker_id: 16
+    persona: "おっとり穏やかで、丁寧な敬語を使う落ち着いた女性。聞き上手で、相手を立てながら話を深める。"
+  - id: takehiro
+    name: "玄野武宏"
+    speaker_id: 11
+    persona: "爽やかで頼れる青年。はきはきとした話し方で、要点を分かりやすくまとめる。"
+  - id: kotarou
+    name: "白上虎太郎"
+    speaker_id: 12
+    persona: "元気いっぱいの少年。好奇心旺盛で、素朴な疑問やリアクションが多い。語尾は明るく軽快。"
+  - id: himari
+    name: "冥鳴ひまり"
+    speaker_id: 14
+    persona: "落ち着いた知的な女性。ふんわりした口調ながら、的確で深い知識を語る。"
+  - id: mochiko
+    name: "もち子さん"
+    speaker_id: 20
+    persona: "マイペースでほんわかした雰囲気。のんびりした口調で、独自の視点から話す。"
+  - id: no7
+    name: "No.7"
+    speaker_id: 29
+    persona: "クールで理知的。アナウンサーのように整った話し方で、客観的に情報を伝える。"
+  - id: zunko
+    name: "東北ずん子"
+    speaker_id: 107
+    persona: "しっかり者で優しいお姉さん。面倒見がよく、丁寧に噛み砕いて説明する。"
+  - id: kiritan
+    name: "東北きりたん"
+    speaker_id: 108
+    persona: "クールで少しツンとしているが芯のある女の子。短めの言葉でずばりと核心を突く。"
+  - id: itako
+    name: "東北イタコ"
+    speaker_id: 109
+    persona: "落ち着いた大人の女性。包容力があり、ゆったりと深みのある語り口。"
+  - id: ankomon
+    name: "あんこもん"
+    speaker_id: 113
+    persona: "語尾に「もん」を付ける独特の口調（例:「おいしいもん」「気になるもん」「楽しいもん」）。甘いもの好きで素直、好奇心旺盛で無邪気。ずんだもんの「なのだ」に匹敵する特徴的な語尾。"

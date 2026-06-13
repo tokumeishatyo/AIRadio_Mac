@@ -315,6 +315,97 @@ struct CornerEngineS13_5Tests {
         #expect(fixture.audio.played.count == 4)  // 本編 4 行のみ
     }
 
+    // MARK: - S14: ゲストコーナー
+
+    @Test("guest format: ゲストを cast 末尾に足し、リード文の {guest}/{theme} を準備時に埋める")
+    func guestAppendedAndLeadInFilled() async throws {
+        let recorder = EventRecorder()
+        let fixture = Fixture()
+        let engine = CornerEngine(
+            llm: fixture.llm, tts: fixture.tts, audio: fixture.audio,
+            searcher: fixture.searcher, spotify: fixture.spotify, clock: fixture.clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!, randomIndex: { _ in 0 },
+            onEvent: { recorder.append($0) }
+        )
+        var guestCorner = corner(playSeconds: 60)
+        guestCorner.format = .guest
+        guestCorner.themePool = ["スポーツ"]   // テーマ確定
+        let guest = DjProfile(id: "sora", name: "九州そら", speakerId: 16, persona: "おっとり穏やか")
+        let context = CornerContext(
+            castDjIds: ["zundamon", "metan"],
+            leadIn: "{ampm}{hour}時{minute}分になりました。本日は{guest}さんを迎えて、{theme}について語ってもらいます。",
+            guest: guest)
+        let prepared = try await engine.prepare(corner: guestCorner, djs: djs, context: context)
+
+        // ゲストが PreparedCorner に保持され、台本プロンプトに専門家フレーミングが入る。
+        #expect(prepared.guest == guest)
+        #expect(recorder.events.contains(.guestReady(name: "九州そら")))
+        #expect(fixture.llm.requests[1].prompt.contains("ゲストを迎えるコーナー"))
+        #expect(fixture.llm.requests[1].prompt.contains("九州そら"))
+        // リード文は {guest}/{theme} 埋め込み済み・時刻プレースホルダは未展開（run で展開）。
+        #expect(prepared.leadIn == "{ampm}{hour}時{minute}分になりました。本日は九州そらさんを迎えて、スポーツについて語ってもらいます。")
+    }
+
+    @Test("guest format: run でゲストが djs に居なくても本番が成立する（cast 末尾から補完）")
+    func guestRunsEvenWhenGuestNotInDjs() async throws {
+        // 台本にゲストのセリフを含め、ゲストが djs 外でも話者解決できることを確認。
+        let guestScript = """
+        ずんだもん: ゲストを迎えるのだ。
+        九州そら: こんにちは、よろしくお願いします。
+        四国めたん: 専門的なお話を伺いますわ。
+        九州そら: もちろんです、語りますよ。
+        """
+        let fixture = Fixture(responses: [candidatesResponse, guestScript])
+        var guestCorner = corner(playSeconds: 60)
+        guestCorner.format = .guest
+        guestCorner.themePool = ["スポーツ"]
+        let guest = DjProfile(id: "sora", name: "九州そら", speakerId: 16, persona: "おっとり")
+        let context = CornerContext(castDjIds: ["zundamon", "metan"], guest: guest)
+        // djs にゲスト(sora)は含めない。
+        let prepared = try await fixture.engine.prepare(corner: guestCorner, djs: djs, context: context)
+        try await fixture.engine.run(prepared: prepared, djs: djs)  // throw しなければ話者解決成功
+        // ゲストのセリフは speaker 16 で合成されている（InMemoryTTS は "speakerId:text"）。
+        #expect(fixture.audio.played.contains(Data("16:こんにちは、よろしくお願いします。".utf8)))
+        // ゲストは cast 末尾（メインが先頭・主導）。台本プロンプトの DJ 名末尾がゲスト。
+        #expect(fixture.llm.requests[1].prompt.contains("「ずんだもん」「四国めたん」「九州そら」"))
+        // 締め曲はテーマ基準でプレフライト選曲（選曲コンテキストにゲスト会話とテーマが入る、s14 §4）。
+        #expect(fixture.llm.requests[0].prompt.contains("候補"))      // 1 回目＝選曲
+        #expect(fixture.llm.requests[0].prompt.contains("ゲストを迎えて"))
+        #expect(fixture.llm.requests[0].prompt.contains("スポーツ"))
+    }
+
+    @Test("guest format: リード文は prepare で guest/theme を埋め、run で時刻を展開（一気通貫）")
+    func guestLeadInFilledAtPrepareTimeExpandedAtRun() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let prepareTime = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 9, minute: 0))!
+        let runTime = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12, hour: 14, minute: 30))!
+        let clock = MutableClock(now: prepareTime)
+        let recorder = EventRecorder()
+        let engine = CornerEngine(
+            llm: ScriptedLLM(responses: [candidatesResponse, scriptResponse]),
+            tts: InMemoryTTS(), audio: SpyAudioPlayer(),
+            searcher: FakeTrackSearcher(results: [TrackInfo(uri: "spotify:track:OK", title: "夜に駆ける", artist: "YOASOBI")]),
+            spotify: FakeSpotifyController(durationSeconds: 240), clock: clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!, randomIndex: { _ in 0 },
+            onEvent: { recorder.append($0) }
+        )
+        var guestCorner = corner(playSeconds: 60)
+        guestCorner.format = .guest
+        guestCorner.themePool = ["スポーツ"]
+        let guest = DjProfile(id: "sora", name: "九州そら", speakerId: 16, persona: "おっとり")
+        let context = CornerContext(
+            castDjIds: ["zundamon", "metan"],
+            leadIn: "{ampm}{hour}時{minute}分になりました。本日は{guest}さんを迎えて、{theme}について熱く語ってもらいます。",
+            guest: guest)
+        let prepared = try await engine.prepare(corner: guestCorner, djs: djs, context: context)
+        clock.set(runTime)
+        try await engine.run(prepared: prepared, djs: djs)
+        // run 時刻（午後2時30分）で時刻展開、guest/theme は準備時に埋め込み済み。
+        #expect(recorder.events.contains(
+            .leadIn("午後2時30分になりました。本日は九州そらさんを迎えて、スポーツについて熱く語ってもらいます。")))
+    }
+
     @Test("時報リード文は prepare 時ではなく run 時の時刻で展開される（発話直前・正確）")
     func leadInUsesRunTimeNotPrepareTime() async throws {
         var calendar = Calendar(identifier: .gregorian)

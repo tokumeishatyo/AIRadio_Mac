@@ -848,3 +848,160 @@ struct BroadcastEngineWeekdayTests {
         }
     }
 }
+
+// MARK: - S14: ゲストコーナー
+
+@Suite("BroadcastEngine: S14（ゲストコーナー）")
+struct BroadcastEngineGuestTests {
+    private static let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+
+    private let guestCorner = CornerTemplate(
+        id: "guest", title: "ゲスト", theme: "テーマ", format: .guest,
+        djIds: ["zundamon", "metan"], fallbackTrackUri: "spotify:track:FALLBACK",
+        leadIn: "{ampm}{hour}時{minute}分。本日は{guest}さんを迎えて{theme}について。")
+    private var cornersWithGuest: [CornerTemplate] { corners + [guestCorner] }
+
+    private let guests = [
+        DjProfile(id: "sora", name: "九州そら", speakerId: 16, persona: "おっとり"),
+        DjProfile(id: "himari", name: "冥鳴ひまり", speakerId: 14, persona: "知的"),
+    ]
+
+    private func guestBlueprint() -> ProgramBlueprint {
+        ProgramBlueprint(
+            title: "t", anchorDjId: "zundamon",
+            song: SongSegmentSpec(fallbackTrackUri: "spotify:track:SF", playSeconds: 45),
+            talkCornerId: "free_talk", letterCornerId: "letter", newsDjId: "ryusei",
+            weeklyCast: WeeklyCast(casts: [5: ["zundamon", "metan"]]),  // 木曜
+            guestCornerId: "guest")
+    }
+
+    private func engine(
+        runner: FakeCornerRunner, guests: [DjProfile], pick: @escaping @Sendable (Int) -> Int,
+        sequencer: SpyThemeSequencer = SpyThemeSequencer(), spotify: FakeSpotifyController = FakeSpotifyController()
+    ) -> BroadcastEngine {
+        BroadcastEngine(
+            themes: themes, themeSequencer: sequencer, cornerRunner: runner,
+            newsProvider: FakeAnnouncementProvider(script: "ニュース原稿"),
+            songPicker: FakeSongPicker(track: TrackInfo(uri: "spotify:track:FIRST", title: "", artist: "")),
+            spotify: spotify, clock: FakeClock(),
+            timeZone: Self.tokyo, randomIndex: pick)
+    }
+
+    @Test("ゲストはプールから乱数で選ばれ、guest コーナーの準備に context.guest として渡る")
+    func guestSelectedAndPassedToGuestCorner() async throws {
+        let runner = FakeCornerRunner()
+        let eng = engine(runner: runner, guests: guests, pick: { _ in 1 })  // guests[1] = himari
+        try await eng.run(
+            plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(2)),
+            corners: cornersWithGuest, djs: djs, guests: guests)
+
+        let ids = runner.preparedCornerIds
+        #expect(ids.filter { $0 == "guest" }.count == 1)   // 1 放送 1 回
+        let gi = try #require(ids.firstIndex(of: "guest"))
+        #expect(runner.contexts[gi].guest?.id == "himari")
+        // 他のトーク/お便りの context には guest は付かない。
+        for (i, id) in ids.enumerated() where id != "guest" {
+            #expect(runner.contexts[i].guest == nil)
+        }
+    }
+
+    @Test("guest コーナーは最初のニュースの後・お便りやトークより後に準備される")
+    func guestCornerComesAfterFirstNews() async throws {
+        let runner = FakeCornerRunner()
+        let eng = engine(runner: runner, guests: guests, pick: { _ in 0 })
+        try await eng.run(
+            plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(2)),
+            corners: cornersWithGuest, djs: djs, guests: guests)
+        // N=2: free_talk(2), free_talk(3), letter(4), guest(6) の順（news は cornerRunner 非対象）。
+        #expect(runner.preparedCornerIds == ["free_talk", "free_talk", "letter", "guest"])
+    }
+
+    @Test("N=4: エンジン経由でもゲストは最初のニュース直後だけ（2 回目のニュース後には付かない）")
+    func guestOnlyAfterFirstNewsAtEngineN4() async throws {
+        let runner = FakeCornerRunner()
+        let eng = engine(runner: runner, guests: guests, pick: { _ in 0 })  // guests[0] = sora
+        try await eng.run(
+            plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(4)),
+            corners: cornersWithGuest, djs: djs, guests: guests)
+        let ids = runner.preparedCornerIds
+        // 1 グループ目の news 直後に guest、2 グループ目には付かない（news は cornerRunner 非対象）。
+        #expect(ids == ["free_talk", "free_talk", "letter", "guest", "free_talk", "free_talk", "letter"])
+        #expect(ids.filter { $0 == "guest" }.count == 1)
+        let gi = try #require(ids.firstIndex(of: "guest"))
+        #expect(runner.contexts[gi].guest?.id == "sora")
+        for (i, id) in ids.enumerated() where id != "guest" {
+            #expect(runner.contexts[i].guest == nil)   // 他のトーク/お便りに guest は付かない
+        }
+    }
+
+    @Test("guestCornerId 設定時にプールが空なら fail-fast（音を出す前に）")
+    func emptyGuestPoolFailsFast() async {
+        let runner = FakeCornerRunner()
+        let sequencer = SpyThemeSequencer()
+        let spotify = FakeSpotifyController()
+        let eng = engine(runner: runner, guests: [], pick: { _ in 0 }, sequencer: sequencer, spotify: spotify)
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(
+                plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(2)),
+                corners: cornersWithGuest, djs: djs, guests: [])
+        }
+        #expect(sequencer.runs.isEmpty)   // OP すら鳴らさず即中止
+        #expect(spotify.events.isEmpty)
+    }
+
+    @Test("ゲスト id がレギュラー（djs）と衝突したら fail-fast")
+    func guestCollidesWithRegularFailsFast() async {
+        let runner = FakeCornerRunner()
+        let sequencer = SpyThemeSequencer()
+        let colliding = [DjProfile(id: "zundamon", name: "X", speakerId: 99, persona: "")]
+        let eng = engine(runner: runner, guests: colliding, pick: { _ in 0 }, sequencer: sequencer)
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(
+                plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(2)),
+                corners: cornersWithGuest, djs: djs, guests: colliding)
+        }
+        #expect(sequencer.runs.isEmpty)
+    }
+
+    @Test("guest コーナー template が corners に無ければ fail-fast")
+    func missingGuestCornerTemplateFailsFast() async {
+        let runner = FakeCornerRunner()
+        let sequencer = SpyThemeSequencer()
+        let eng = engine(runner: runner, guests: guests, pick: { _ in 0 }, sequencer: sequencer)
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(
+                plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(2)),
+                corners: corners, djs: djs, guests: guests)  // guest template 無し
+        }
+        #expect(sequencer.runs.isEmpty)
+    }
+
+    @Test("ゲストが出ない短い番組（N=1）ではプールが空でも中止しない（検証はゲスト登場時のみ）")
+    func noGuestValidationWhenNoGuestCorner() async throws {
+        // guestCornerId は設定済みだが N=1 でニュースが無い → ゲストコーナーは生成されない。
+        // この場合プール空でも fail-fast せず通常どおり放送できる（誤中止しない）。
+        let runner = FakeCornerRunner()
+        let eng = engine(runner: runner, guests: [], pick: { _ in 0 })
+        try await eng.run(
+            plan: ProgramPlan(blueprint: guestBlueprint(), length: .corners(1)),
+            corners: cornersWithGuest, djs: djs, guests: [])
+        #expect(!runner.preparedCornerIds.contains("guest"))
+    }
+
+    @Test("guest.corner_id が talk/letter と重複したら fail-fast")
+    func guestCornerIdCollidesWithTalkOrLetterFailsFast() async {
+        let runner = FakeCornerRunner()
+        let blueprint = ProgramBlueprint(
+            title: "t", anchorDjId: "zundamon",
+            song: SongSegmentSpec(fallbackTrackUri: "spotify:track:SF", playSeconds: 45),
+            talkCornerId: "free_talk", letterCornerId: "letter", newsDjId: "ryusei",
+            weeklyCast: WeeklyCast(casts: [5: ["zundamon", "metan"]]),
+            guestCornerId: "free_talk")  // talk と重複
+        let eng = engine(runner: runner, guests: guests, pick: { _ in 0 })
+        await #expect(throws: ConfigError.self) {
+            try await eng.run(
+                plan: ProgramPlan(blueprint: blueprint, length: .corners(2)),
+                corners: cornersWithGuest, djs: djs, guests: guests)
+        }
+    }
+}

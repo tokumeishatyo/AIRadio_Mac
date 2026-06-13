@@ -40,12 +40,14 @@ public struct DialogueScript: Sendable, Equatable {
     }
 }
 
-/// コーナーの進行フォーマット（仕様 s12 §2）。
+/// コーナーの進行フォーマット（仕様 s12 §2 / s14）。
 public enum CornerFormat: String, Sendable, Equatable {
     /// テーマについて DJ 二人が会話し、最後に一曲かける（基本パターン）。
     case freeTalk = "free_talk"
     /// 架空リスナーのお便りを読み上げ → 感想 → リクエスト曲。
     case letter
+    /// ゲストを迎えてテーマについて会話 → リクエスト曲（その日のテーマに詳しい専門家として登場、仕様 s14）。
+    case guest
 }
 
 /// コーナー準備時に番組側（`BroadcastEngine`）から渡す実行コンテキスト（仕様 s13.5 §7）。
@@ -58,11 +60,14 @@ public struct CornerContext: Sendable, Equatable {
     /// 本編前に読み上げる時報リード文テンプレート（時刻プレースホルダを含む、発話直前に展開）。
     /// nil／空なら頭出しなし（冒頭コーナーは nil）。
     public var leadIn: String?
+    /// ゲストコーナーのとき、迎えるゲスト（cast 末尾に追加。仕様 s14）。nil＝ゲストなし。
+    public var guest: DjProfile?
 
-    public init(castDjIds: [String] = [], greeting: String? = nil, leadIn: String? = nil) {
+    public init(castDjIds: [String] = [], greeting: String? = nil, leadIn: String? = nil, guest: DjProfile? = nil) {
         self.castDjIds = castDjIds
         self.greeting = greeting
         self.leadIn = leadIn
+        self.guest = guest
     }
 }
 

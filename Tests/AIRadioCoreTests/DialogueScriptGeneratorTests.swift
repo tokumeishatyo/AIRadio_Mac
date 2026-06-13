@@ -175,6 +175,29 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める"))
         #expect(!request.prompt.contains("番組の最初のコーナー"))
     }
+
+    @Test("guest 非 nil: ゲスト挨拶・専門家フレーミング・お礼を指示し、ゲストを出演者に含める（s14）")
+    func guestPromptFramesExpertAndThanks() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let guest = DjProfile(id: "sora", name: "九州そら", speakerId: 16, persona: "おっとり穏やか")
+        // cast はメイン + ゲスト（末尾）。
+        let cast = djs + [guest]
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: cast, song: song, theme: "スポーツ", guest: guest)
+        #expect(request.prompt.contains("ゲストを迎えるコーナー"))
+        #expect(request.prompt.contains("九州そら"))
+        #expect(request.prompt.contains("スポーツ"))          // テーマに詳しい専門家
+        #expect(request.prompt.contains("専門家"))
+        #expect(request.prompt.contains("お礼"))
+        #expect(request.system?.contains("おっとり穏やか") == true)  // ゲストの persona が出演者欄に
+    }
+
+    @Test("guest nil（既定）: ゲスト関連の指示は入らない")
+    func noGuestPromptByDefault() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: djs, song: song)
+        #expect(!request.prompt.contains("ゲストを迎えるコーナー"))
+    }
 }
 
 @Suite("DialogueScriptGenerator: 生成")

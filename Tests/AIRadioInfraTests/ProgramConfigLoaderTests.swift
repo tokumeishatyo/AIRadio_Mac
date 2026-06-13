@@ -133,4 +133,17 @@ struct ProgramConfigLoaderTests {
         let emptyDay = fullYaml + "\n  weekly_cast:\n    monday: []\n"
         #expect(throws: ConfigError.self) { _ = try ProgramConfigLoader.load(yaml: emptyDay) }
     }
+
+    // MARK: - guest.corner_id（s14）
+
+    @Test("guest.corner_id 省略時は nil（ゲストコーナー無効）")
+    func guestCornerIdDefaultsNil() throws {
+        #expect(try ProgramConfigLoader.load(yaml: fullYaml).guestCornerId == nil)
+    }
+
+    @Test("guest.corner_id を読み込む")
+    func loadsGuestCornerId() throws {
+        let yaml = fullYaml + "\n  guest:\n    corner_id: guest\n"
+        #expect(try ProgramConfigLoader.load(yaml: yaml).guestCornerId == "guest")
+    }
 }

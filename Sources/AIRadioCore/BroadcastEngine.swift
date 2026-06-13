@@ -35,6 +35,8 @@ public struct BroadcastEngine: Sendable {
     private let spotify: any SpotifyController
     private let clock: any Clock
     private let timeZone: TimeZone
+    /// ゲスト選定用の乱数（0..<count のインデックス。テストは決定論的に注入。仕様 s14）。
+    private let randomIndex: @Sendable (Int) -> Int
     private let onEvent: (@Sendable (BroadcastEvent) -> Void)?
 
     public init(
@@ -46,6 +48,7 @@ public struct BroadcastEngine: Sendable {
         spotify: any SpotifyController,
         clock: any Clock,
         timeZone: TimeZone = .current,
+        randomIndex: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) },
         onEvent: (@Sendable (BroadcastEvent) -> Void)? = nil
     ) {
         self.themes = themes
@@ -56,6 +59,7 @@ public struct BroadcastEngine: Sendable {
         self.spotify = spotify
         self.clock = clock
         self.timeZone = timeZone
+        self.randomIndex = randomIndex
         self.onEvent = onEvent
     }
 
@@ -63,6 +67,7 @@ public struct BroadcastEngine: Sendable {
         plan: ProgramPlan,
         corners: [CornerTemplate],
         djs: [DjProfile],
+        guests: [DjProfile] = [],
         control: BroadcastControl? = nil
     ) async throws {
         // fail-fast 検証（音を出す前に設定不整合を弾く）。
@@ -78,6 +83,25 @@ public struct BroadcastEngine: Sendable {
             guard djs.contains(where: { $0.id == newsDjId }) else {
                 throw ConfigError.missingField("program.news.dj_id に未定義の DJ: \(newsDjId)")
             }
+        }
+        // ゲストコーナー検証＋選定（仕様 s14）。実際にゲスト枠が出る放送のときだけ行う
+        // （N<2 等でゲストが出ないなら、プール空でも誤って放送中止しない）。
+        var selectedGuest: DjProfile?
+        if let guestCornerId = plan.blueprint.guestCornerId, plan.includesGuestCorner {
+            guard corners.contains(where: { $0.id == guestCornerId }) else {
+                throw ConfigError.missingField("program.guest.corner_id に未定義のコーナー: \(guestCornerId)")
+            }
+            // ゲストコーナー id はトーク／お便りと別物でなければならない（同じだと全トークがゲスト化する）。
+            guard guestCornerId != plan.blueprint.talkCornerId, guestCornerId != plan.blueprint.letterCornerId else {
+                throw ConfigError.missingField("program.guest.corner_id が talk/letter と重複: \(guestCornerId)")
+            }
+            guard !guests.isEmpty else {
+                throw ConfigError.missingField("guests: ゲストプールが空です（ゲストコーナー有効時は必須）")
+            }
+            if let collision = guests.first(where: { guest in djs.contains { $0.id == guest.id } }) {
+                throw ConfigError.missingField("guests にレギュラーと衝突する id: \(collision.id)")
+            }
+            selectedGuest = guests[randomIndex(guests.count)]
         }
         // その日の編成（先頭＝メイン）を解決（仕様 s13.5 §2）。空・未定義 id は fail-fast。
         let castDjIds = plan.blueprint.weeklyCast.djIds(for: clock.now, timeZone: timeZone)
@@ -98,7 +122,7 @@ public struct BroadcastEngine: Sendable {
             defer { ledger.cancelAll() }
             try await broadcast(
                 plan: plan, corners: corners, djs: djs,
-                cast: cast, main: main, anchor: anchor, control: control, ledger: ledger)
+                cast: cast, main: main, anchor: anchor, guest: selectedGuest, control: control, ledger: ledger)
         } onCancel: {
             ledger.cancelAll()
         }
@@ -113,6 +137,7 @@ public struct BroadcastEngine: Sendable {
         cast: [DjProfile],
         main: DjProfile,
         anchor: DjProfile,
+        guest: DjProfile?,
         control: BroadcastControl?,
         ledger: PreparationLedger
     ) async throws {
@@ -131,7 +156,8 @@ public struct BroadcastEngine: Sendable {
                 guard let segment = plan.segment(at: index) else { return }
                 let context = cornerContext(
                     for: segment, at: index, corners: corners,
-                    castDjIds: castDjIds, firstTalkIndex: firstTalkIndex, greeting: greeting)
+                    castDjIds: castDjIds, firstTalkIndex: firstTalkIndex, greeting: greeting,
+                    guestCornerId: plan.blueprint.guestCornerId, guest: guest)
                 startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, context: context, ledger: ledger)
             }
         }
@@ -362,9 +388,16 @@ public struct BroadcastEngine: Sendable {
         corners: [CornerTemplate],
         castDjIds: [String],
         firstTalkIndex: Int?,
-        greeting: String?
+        greeting: String?,
+        guestCornerId: String?,
+        guest: DjProfile?
     ) -> CornerContext {
         guard segment.kind == .talk else { return CornerContext() }
+        // ゲストコーナー（最初の news 直後に挿入された talk）: ゲストを cast 末尾に、リード文付き（仕様 s14）。
+        if let guestCornerId, segment.cornerId == guestCornerId {
+            let leadIn = corners.first { $0.id == segment.cornerId }?.leadIn
+            return CornerContext(castDjIds: castDjIds, greeting: nil, leadIn: leadIn, guest: guest)
+        }
         if index == firstTalkIndex {
             // 冒頭コーナー: 時刻連動の挨拶＋出演者紹介。リード文なし。
             return CornerContext(castDjIds: castDjIds, greeting: greeting, leadIn: nil)

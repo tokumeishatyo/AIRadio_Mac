@@ -192,6 +192,8 @@ func runCornerDemo() async {
                     print("テーマ: \(theme)")
                 case .letterReady(let radioName):
                     print("お便り: ラジオネーム \(radioName)")
+                case .guestReady(let name):
+                    print("ゲスト: \(name)")
                 case .songPicked(let track):
                     let label = track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)"
                     print("締めの曲（プレフライト済み）: \(label)")

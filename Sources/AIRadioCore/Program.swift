@@ -96,6 +96,9 @@ public struct ProgramBlueprint: Sendable, Equatable {
     public var newsDjId: String?
     /// 曜日替わり編成（メイン＝先頭。仕様 s13.5 §2）。
     public var weeklyCast: WeeklyCast
+    /// ゲストコーナー（corners.yaml の id）。nil でゲストコーナー無効（仕様 s14 §3）。
+    /// 設定すると最初の news の直後に 1 回だけゲスト talk が挿入される。
+    public var guestCornerId: String?
 
     public init(
         title: String,
@@ -106,7 +109,8 @@ public struct ProgramBlueprint: Sendable, Equatable {
         talkCornerId: String,
         letterCornerId: String,
         newsDjId: String? = nil,
-        weeklyCast: WeeklyCast = .standard
+        weeklyCast: WeeklyCast = .standard,
+        guestCornerId: String? = nil
     ) {
         self.title = title
         self.anchorDjId = anchorDjId
@@ -117,6 +121,7 @@ public struct ProgramBlueprint: Sendable, Equatable {
         self.letterCornerId = letterCornerId
         self.newsDjId = newsDjId
         self.weeklyCast = weeklyCast
+        self.guestCornerId = guestCornerId
     }
 }
 
@@ -169,12 +174,25 @@ public struct ProgramPlan: Sendable, Equatable {
     public var title: String { blueprint.title }
     public var anchorDjId: String { blueprint.anchorDjId }
 
-    /// 総セグメント数（エンドレスは nil。UI の「n/全体」表示用）。
+    /// 総セグメント数（エンドレスは nil。UI の「n/全体」表示用）。ゲストコーナーがあれば +1。
     public var totalSegmentCount: Int? {
         guard case .corners(let n) = length else { return nil }
-        // OP + song + 本編（ペア×4 + 端数）+ ED
-        return 2 + (n / 2) * 4 + (n % 2) + 1
+        // OP + song + 本編（ペア×4 + 端数）+ ED（+ ゲスト 1）
+        return 2 + (n / 2) * 4 + (n % 2) + 1 + (includesGuestCorner ? 1 : 0)
     }
+
+    /// この番組がゲストコーナーを実際に含むか（guestCornerId 設定 かつ 最初の news が存在＝N≥2 / エンドレス。仕様 s14 §3）。
+    /// 番組側はこれを見て「ゲストが出る放送のときだけ」ゲスト検証・選定を行う（N<2 で誤って中止しないため）。
+    public var includesGuestCorner: Bool {
+        guard blueprint.guestCornerId != nil else { return false }
+        switch length {
+        case .endless: return true
+        case .corners(let n): return n >= 2
+        }
+    }
+
+    /// ゲスト talk が入る body 位置（最初の news の次 = body 4）。挿入しないなら nil。
+    private var guestBodyPosition: Int? { includesGuestCorner ? 4 : nil }
 
     /// index 番目のセグメント（0 始まり）。有限番組は ED の次で nil、エンドレスは常に非 nil。
     public func segment(at index: Int) -> ProgramSegment? {
@@ -190,7 +208,20 @@ public struct ProgramPlan: Sendable, Equatable {
         }
     }
 
+    /// 本編 body の index → セグメント。ゲストコーナーが有効なら最初の news の次（body 4）に
+    /// ゲスト talk を割り込ませ、以降の位置を 1 つ後ろの素のパターンへ写す（仕様 s14 §3）。
     private func bodySegment(at body: Int) -> ProgramSegment? {
+        guard let guestPos = guestBodyPosition else {
+            return patternBodySegment(at: body)
+        }
+        if body == guestPos {
+            return ProgramSegment(kind: .talk, cornerId: blueprint.guestCornerId)
+        }
+        return patternBodySegment(at: body < guestPos ? body : body - 1)
+    }
+
+    /// ゲスト挿入を考慮しない素の本編 body（`talk, talk, letter, news` の繰り返し + 端数 + ED）。
+    private func patternBodySegment(at body: Int) -> ProgramSegment? {
         switch length {
         case .endless:
             return patternSegment(at: body % 4)

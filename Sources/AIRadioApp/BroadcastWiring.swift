@@ -48,11 +48,12 @@ struct BroadcastStack {
     let plan: ProgramPlan
     let corners: [CornerTemplate]
     let djs: [DjProfile]
+    let guests: [DjProfile]
     /// 放送中の操作（「ED で終了」）。
     let control: BroadcastControl
 
     func run() async throws {
-        try await engine.run(plan: plan, corners: corners, djs: djs, control: control)
+        try await engine.run(plan: plan, corners: corners, djs: djs, guests: guests, control: control)
     }
 }
 
@@ -68,6 +69,11 @@ func makeBroadcastStack(
     let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
     let djs = try DjsConfigLoader.load(path: "config/djs.yaml")
     let corners = try CornersConfigLoader.load(path: "config/corners.yaml")
+    // ゲストプール（ゲストコーナー有効時に使用）。ファイルが無ければ空（ゲストコーナー無効時はそれでよい）。
+    // ファイルが存在するのに壊れている場合は握り潰さず起動エラーにする（後で「プールが空」と誤誘導しないため）。
+    let guests: [DjProfile] = FileManager.default.fileExists(atPath: "config/guests.yaml")
+        ? try GuestsConfigLoader.load(path: "config/guests.yaml")
+        : []
     let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
     let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
 
@@ -126,7 +132,7 @@ func makeBroadcastStack(
         blueprint: blueprint,
         length: selectedProgramLength(defaultLength: blueprint.defaultLength)
     )
-    return BroadcastStack(engine: engine, plan: plan, corners: corners, djs: djs, control: BroadcastControl())
+    return BroadcastStack(engine: engine, plan: plan, corners: corners, djs: djs, guests: guests, control: BroadcastControl())
 }
 
 /// コーナー進行のコンソール出力（デモ・常駐どちらでも進行ログとして使う）。
@@ -136,6 +142,8 @@ func makeBroadcastStack(
         print("  テーマ: \(theme)")
     case .letterReady(let radioName):
         print("  お便り: ラジオネーム \(radioName)")
+    case .guestReady(let name):
+        print("  ゲスト: \(name)")
     case .songPicked(let track):
         print("  締めの曲: \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
     case .scriptReady(let lineCount, let totalCharacters):

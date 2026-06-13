@@ -52,3 +52,28 @@ corners:
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
     volume: 100
     play_seconds: 0
+  # ゲストコーナー（format: guest、仕様 s14）。最初のニュースの直後に 1 回だけ挿入される。
+  # ゲストはその日ランダムに選ばれ、{guest}/{theme} は準備時に、時刻は発話直前に展開される。
+  - id: guest
+    title: "ゲストコーナー"
+    format: guest
+    lead_in: "{ampm}{hour}時{minute}分になりました。次はゲストコーナーです。本日は{guest}さんを迎えて、{theme}について熱く語ってもらいます。"
+    theme: "最近ちょっと気になっていること"
+    themes:
+      - "お酒の楽しみ方"
+      - "おいしい料理・ごはん"
+      - "スイーツ・甘いもの"
+      - "旅行・おでかけ"
+      - "スポーツ"
+      - "音楽の楽しみ方"
+      - "映画・ドラマ"
+      - "ゲーム"
+      - "季節の楽しみ"
+      - "最近ちょっと気になっていること"
+    dj_ids: [zundamon, metan]
+    target_minutes: 5
+    chars_per_minute: 320
+    song_prompt_hint: "ゲストとの会話の余韻に合う、よく知られた邦楽・洋楽"
+    fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
+    volume: 100
+    play_seconds: 0

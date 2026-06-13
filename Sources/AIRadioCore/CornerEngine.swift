@@ -4,6 +4,8 @@ import Foundation
 public enum CornerEvent: Sendable, Equatable {
     case themeSelected(String)
     case letterReady(radioName: String)
+    /// ゲストコーナーで迎えるゲストが確定（仕様 s14）。
+    case guestReady(name: String)
     case songPicked(TrackInfo)
     case scriptReady(lineCount: Int, totalCharacters: Int)
     /// 時報リード文（発話直前に時刻展開した実テキスト。仕様 s13.5 §5）。
@@ -27,6 +29,8 @@ public struct PreparedCorner: Sendable, Equatable {
     public let leadIn: String?
     /// 時報リード文の読み手（その日のメイン）の speaker id。
     public let leadInSpeakerId: Int
+    /// ゲストコーナーで迎えたゲスト（cast 末尾の出演者。`castDjIds` には含めず別持ち＝djs に居ないため。仕様 s14）。
+    public let guest: DjProfile?
 
     public init(
         corner: CornerTemplate,
@@ -35,7 +39,8 @@ public struct PreparedCorner: Sendable, Equatable {
         lineAudio: [Data] = [],
         castDjIds: [String] = [],
         leadIn: String? = nil,
-        leadInSpeakerId: Int = 0
+        leadInSpeakerId: Int = 0,
+        guest: DjProfile? = nil
     ) {
         self.corner = corner
         self.song = song
@@ -44,6 +49,7 @@ public struct PreparedCorner: Sendable, Equatable {
         self.castDjIds = castDjIds
         self.leadIn = leadIn
         self.leadInSpeakerId = leadInSpeakerId
+        self.guest = guest
     }
 }
 
@@ -94,15 +100,20 @@ public struct CornerEngine: CornerRunning, Sendable {
     /// 出演者は context.castDjIds（その日の編成・先頭＝メイン）で上書き、冒頭は挨拶、他は時報リード文（仕様 s13.5）。
     public func prepare(corner: CornerTemplate, djs: [DjProfile], context: CornerContext = CornerContext()) async throws -> PreparedCorner {
         let castIds = context.castDjIds.isEmpty ? corner.djIds : context.castDjIds
-        let cast = try resolveCast(ids: castIds, djs: djs)
+        let baseCast = try resolveCast(ids: castIds, djs: djs)
         let theme = selectTheme(for: corner)
         onEvent?(.themeSelected(theme))
         let dateContext = SeasonPhrases.dateContext(date: clock.now, timeZone: timeZone)
         let picker = SongPicker(llm: llm, searcher: searcher, temperature: temperature)
         let generator = DialogueScriptGenerator(llm: llm, temperature: temperature)
 
+        // ゲストコーナー（format: guest）のときだけ、その日の編成の末尾にゲストを足す（cast に居ないため別持ち）。
+        let guest: DjProfile? = (corner.format == .guest) ? context.guest : nil
+        if let guest { onEvent?(.guestReady(name: guest.name)) }
+        let cast = guest.map { baseCast + [$0] } ?? baseCast
+
         // letter: ①お便り生成 → ②リクエスト曲（お便り内容を選曲コンテキストに）→ ③台本（読み上げ + 感想 + 曲振り）
-        // free_talk: ①選曲 → ②台本（いずれも曲紹介テキストの生成より前に再生可否を確定する、§3-2）
+        // guest/free_talk: ①選曲 → ②台本（いずれも曲紹介テキストの生成より前に再生可否を確定する、§3-2）
         let letter: ListenerLetter?
         let songContext: String
         switch corner.format {
@@ -113,6 +124,9 @@ public struct CornerEngine: CornerRunning, Sendable {
             letter = generated
             songContext = "ラジオコーナー「\(corner.title)」でリスナーのお便りに応えてかけるリクエスト曲。"
                 + "お便りの内容: \(generated.body)"
+        case .guest:
+            letter = nil
+            songContext = "ラジオコーナー「\(corner.title)」（テーマ: \(theme)）でゲストを迎えての会話の締めにかける曲"
         case .freeTalk:
             letter = nil
             songContext = "ラジオコーナー「\(corner.title)」（テーマ: \(theme)）の締めにかける曲"
@@ -128,7 +142,7 @@ public struct CornerEngine: CornerRunning, Sendable {
         let script = try await generator.generate(
             corner: corner, djs: cast, song: song,
             theme: theme, dateContext: dateContext, letter: letter,
-            greeting: context.greeting
+            greeting: context.greeting, guest: guest
         )
         onEvent?(.scriptReady(lineCount: script.lines.count, totalCharacters: script.totalCharacters))
 
@@ -140,10 +154,17 @@ public struct CornerEngine: CornerRunning, Sendable {
         }
 
         // 時報リード文は事前合成しない（時刻が再生時点でずれるため）。テンプレートのまま持ち、run で発話直前展開。
-        let leadIn = (context.leadIn?.isEmpty == false) ? context.leadIn : nil
+        // {theme}/{guest} は準備時点で確定済みなのでここで埋め、時刻プレースホルダのみ残す（仕様 s14）。
+        var leadIn = (context.leadIn?.isEmpty == false) ? context.leadIn : nil
+        if var filled = leadIn {
+            filled = filled.replacingOccurrences(of: "{theme}", with: theme)
+            if let guest { filled = filled.replacingOccurrences(of: "{guest}", with: guest.name) }
+            leadIn = filled
+        }
         return PreparedCorner(
             corner: corner, song: song, script: script, lineAudio: lineAudio,
-            castDjIds: castIds, leadIn: leadIn, leadInSpeakerId: cast.first?.speakerId ?? 0
+            castDjIds: castIds, leadIn: leadIn, leadInSpeakerId: baseCast.first?.speakerId ?? 0,
+            guest: guest
         )
     }
 
@@ -156,7 +177,10 @@ public struct CornerEngine: CornerRunning, Sendable {
     public func run(prepared: PreparedCorner, djs: [DjProfile]) async throws {
         let castIds = prepared.castDjIds.isEmpty ? prepared.corner.djIds : prepared.castDjIds
         do {
-            try await perform(prepared: prepared, cast: try resolveCast(ids: castIds, djs: djs))
+            // ゲストは djs に居ないため prepared から末尾に補う（準備時と同じ並び）。
+            var cast = try resolveCast(ids: castIds, djs: djs)
+            if let guest = prepared.guest { cast.append(guest) }
+            try await perform(prepared: prepared, cast: cast)
         } catch {
             // 完全静寂（§3-1）: エラー / キャンセルでも必ず曲を止め、音量をフルに戻す。
             await spotify.pauseIgnoringCancellation(restoringVolume: prepared.corner.volume)

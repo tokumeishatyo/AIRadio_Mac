@@ -19,12 +19,13 @@ public struct DialogueScriptGenerator: Sendable {
         theme: String? = nil,
         dateContext: String = "",
         letter: ListenerLetter? = nil,
-        greeting: String? = nil
+        greeting: String? = nil,
+        guest: DjProfile? = nil
     ) async throws -> DialogueScript {
         let request = Self.makeRequest(
             corner: corner, djs: djs, song: song,
             theme: theme, dateContext: dateContext, letter: letter,
-            greeting: greeting, temperature: temperature
+            greeting: greeting, guest: guest, temperature: temperature
         )
         let raw = try await llm.generate(request)
         return try Self.parse(raw, djs: djs)
@@ -43,6 +44,7 @@ public struct DialogueScriptGenerator: Sendable {
         dateContext: String = "",
         letter: ListenerLetter? = nil,
         greeting: String? = nil,
+        guest: DjProfile? = nil,
         temperature: Double = 0.9
     ) -> LLMRequest {
         let selectedTheme = theme ?? corner.theme
@@ -101,6 +103,12 @@ public struct DialogueScriptGenerator: Sendable {
         if let letter {
             constraints.append("メインがまず「ラジオネーム \(letter.radioName)さんからのお便り」と紹介し、本文をセリフとして自然に読み上げる。")
             constraints.append("読み上げのあと、出演者でお便りへの感想を話す（テーマ: \(selectedTheme)。脱線してよい）。")
+        }
+        if let guest {
+            // ゲストコーナー（仕様 s14）: 正式な紹介はリード文が済ませている前提で、軽い挨拶から本題へ。
+            constraints.append("これはゲストを迎えるコーナー。ゲスト「\(guest.name)」が冒頭で軽く挨拶し（番組名の名乗りや大げさな自己紹介は不要）、メイン「\(main)」の進行でテーマ「\(selectedTheme)」を会話する。")
+            constraints.append("ゲスト「\(guest.name)」は「\(selectedTheme)」に詳しい専門家として、具体的なエピソードや豆知識を交えて語る。サブは相づち・質問で会話を回す。")
+            constraints.append("コーナーの最後に、メインがゲスト「\(guest.name)」へお礼を述べてから曲を紹介する。")
         }
         if !dateContext.isEmpty {
             constraints.append("季節や時候の話は、上の日付・季節に合わせる。")

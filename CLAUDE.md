@@ -71,7 +71,7 @@ Swift 慣習に従い `I` プレフィックスは**付けない**。PascalCase 
 
 ### 4-3. エラーコード
 形式 `E-<CAT3>-<DETAIL>-<NNN>`（例: `E-SPT-NO-DEVICE-001`）。Swift では enum の case に安定コード文字列を持たせる。
-カテゴリ: CFG / RTM / SPT / TTS / LLM / NEWS / WX / RES。台帳は `docs/specs/error-codes.md`。
+カテゴリ: CFG / RTM / SPT / TTS / LLM / NEWS / WX / RES / ART。台帳は `docs/specs/error-codes.md`。
 放送事故ゼロ系（プレフライト・BGM 失敗）は fail-tolerant（ログ + 継続）、起動時設定不正は fail-fast。
 
 ### 4-4. テスト方針

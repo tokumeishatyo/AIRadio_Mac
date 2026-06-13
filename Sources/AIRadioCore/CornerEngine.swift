@@ -130,6 +130,9 @@ public struct CornerEngine: CornerRunning, Sendable {
         case .freeTalk:
             letter = nil
             songContext = "ラジオコーナー「\(corner.title)」（テーマ: \(theme)）の締めにかける曲"
+        case .artistFeature:
+            // アーティスト特集は専用の ArtistFeatureEngine で実行する（仕様 s15）。CornerEngine には来ない想定。
+            throw ConfigError.missingField("artist_feature は CornerEngine では実行しない（ArtistFeatureEngine を使う）")
         }
 
         let song = try await picker.pick(SongRequest(

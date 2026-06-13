@@ -30,12 +30,14 @@ public struct BroadcastEngine: Sendable {
     private let themes: BroadcastThemes
     private let themeSequencer: any ThemeSequencing
     private let cornerRunner: any CornerRunning
+    /// アーティスト特集の実行（仕様 s15）。特集コーナー有効時は必須（未配線なら fail-fast）。
+    private let artistFeatureRunner: (any ArtistFeatureRunning)?
     private let newsProvider: any AnnouncementProviding
     private let songPicker: (any SongPicking)?
     private let spotify: any SpotifyController
     private let clock: any Clock
     private let timeZone: TimeZone
-    /// ゲスト選定用の乱数（0..<count のインデックス。テストは決定論的に注入。仕様 s14）。
+    /// ゲスト・特集アーティスト選定用の乱数（0..<count のインデックス。テストは決定論的に注入。仕様 s14/s15）。
     private let randomIndex: @Sendable (Int) -> Int
     private let onEvent: (@Sendable (BroadcastEvent) -> Void)?
 
@@ -43,6 +45,7 @@ public struct BroadcastEngine: Sendable {
         themes: BroadcastThemes,
         themeSequencer: any ThemeSequencing,
         cornerRunner: any CornerRunning,
+        artistFeatureRunner: (any ArtistFeatureRunning)? = nil,
         newsProvider: any AnnouncementProviding,
         songPicker: (any SongPicking)? = nil,
         spotify: any SpotifyController,
@@ -54,6 +57,7 @@ public struct BroadcastEngine: Sendable {
         self.themes = themes
         self.themeSequencer = themeSequencer
         self.cornerRunner = cornerRunner
+        self.artistFeatureRunner = artistFeatureRunner
         self.newsProvider = newsProvider
         self.songPicker = songPicker
         self.spotify = spotify
@@ -68,6 +72,7 @@ public struct BroadcastEngine: Sendable {
         corners: [CornerTemplate],
         djs: [DjProfile],
         guests: [DjProfile] = [],
+        artists: [ArtistProfile] = [],
         control: BroadcastControl? = nil
     ) async throws {
         // fail-fast 検証（音を出す前に設定不整合を弾く）。
@@ -103,6 +108,25 @@ public struct BroadcastEngine: Sendable {
             }
             selectedGuest = guests[randomIndex(guests.count)]
         }
+        // アーティスト特集の検証＋選定（仕様 s15）。特集が出る放送（ゲスト従属）のときだけ行う。
+        // プールが空でも fail-fast にしない（空ならスキップ。仕様 s15 §8-4）。壊れた設定のみ fail-fast。
+        var selectedArtist: ArtistProfile?
+        if let featureCornerId = plan.blueprint.artistFeatureCornerId, plan.includesArtistFeature {
+            guard corners.contains(where: { $0.id == featureCornerId }) else {
+                throw ConfigError.missingField("program.artist_feature.corner_id に未定義のコーナー: \(featureCornerId)")
+            }
+            guard featureCornerId != plan.blueprint.talkCornerId,
+                  featureCornerId != plan.blueprint.letterCornerId,
+                  featureCornerId != plan.blueprint.guestCornerId else {
+                throw ConfigError.missingField("program.artist_feature.corner_id が talk/letter/guest と重複: \(featureCornerId)")
+            }
+            guard artistFeatureRunner != nil else {
+                throw ConfigError.missingField("artistFeatureRunner が未配線です（アーティスト特集有効時は必須）")
+            }
+            if !artists.isEmpty {
+                selectedArtist = artists[randomIndex(artists.count)]
+            }
+        }
         // その日の編成（先頭＝メイン）を解決（仕様 s13.5 §2）。空・未定義 id は fail-fast。
         let castDjIds = plan.blueprint.weeklyCast.djIds(for: clock.now, timeZone: timeZone)
         guard !castDjIds.isEmpty else {
@@ -122,7 +146,8 @@ public struct BroadcastEngine: Sendable {
             defer { ledger.cancelAll() }
             try await broadcast(
                 plan: plan, corners: corners, djs: djs,
-                cast: cast, main: main, anchor: anchor, guest: selectedGuest, control: control, ledger: ledger)
+                cast: cast, main: main, anchor: anchor, guest: selectedGuest, artist: selectedArtist,
+                control: control, ledger: ledger)
         } onCancel: {
             ledger.cancelAll()
         }
@@ -138,6 +163,7 @@ public struct BroadcastEngine: Sendable {
         main: DjProfile,
         anchor: DjProfile,
         guest: DjProfile?,
+        artist: ArtistProfile?,
         control: BroadcastControl?,
         ledger: PreparationLedger
     ) async throws {
@@ -158,7 +184,7 @@ public struct BroadcastEngine: Sendable {
                     for: segment, at: index, corners: corners,
                     castDjIds: castDjIds, firstTalkIndex: firstTalkIndex, greeting: greeting,
                     guestCornerId: plan.blueprint.guestCornerId, guest: guest)
-                startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, context: context, ledger: ledger)
+                startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, context: context, artist: artist, ledger: ledger)
             }
         }
 
@@ -186,7 +212,9 @@ public struct BroadcastEngine: Sendable {
                 if let control, control.isEndingRequested, segment.kind != .ending {
                     onEvent?(.endingRequested)
                     var edIndex = index + 1
-                    if let next = plan.segment(at: edIndex),
+                    // 特集の直後は素の talk が続くが、特集を流し切ったら ED へ直行（余分なトークを挟まない、仕様 s15 §8-5）。
+                    if segment.kind != .artistFeature,
+                       let next = plan.segment(at: edIndex),
                        next.kind == .talk,
                        next.cornerId == plan.blueprint.talkCornerId,
                        ledger.isCornerPrepared(at: edIndex) {
@@ -296,6 +324,17 @@ public struct BroadcastEngine: Sendable {
             }
             let prepared = try await preparation.value
             try await cornerRunner.run(prepared: prepared, djs: djs)
+        case .artistFeature:
+            // 先行準備（窓内に完了済み）を取り出して実行。skipped（プール空 / 曲不足）なら
+            // run が featureSkipped を出して何も流さない（仕様 s15 §8-4）。
+            guard let task = ledger.artistFeatureTask(at: index) else {
+                throw BroadcastError.segmentFailed("artist_feature: 準備タスクがありません（index \(index)）")
+            }
+            let prepared = try await task.value
+            guard let runner = artistFeatureRunner else {
+                throw BroadcastError.segmentFailed("artist_feature: ランナー未配線（index \(index)）")
+            }
+            try await runner.run(prepared: prepared, djs: djs)
         case .news:
             // 原稿は出現のたびに先行準備で生成（長時間放送でニュースが更新される、s13 §3）。
             // 読み手は専任（program.news.dj_id＝龍星。曜日替わりの影響を受けない）。
@@ -329,6 +368,7 @@ public struct BroadcastEngine: Sendable {
         corners: [CornerTemplate],
         djs: [DjProfile],
         context: CornerContext,
+        artist: ArtistProfile?,
         ledger: PreparationLedger
     ) {
         switch segment.kind {
@@ -340,6 +380,21 @@ public struct BroadcastEngine: Sendable {
                 let prepared = try await runner.prepare(corner: corner, djs: djs, context: context)
                 ledger.markCornerPrepared(at: index)
                 return prepared
+            })
+        case .artistFeature:
+            // 特集の準備（top-tracks + 台本 + 事前合成）。直前の長いゲスト talk が緩衝になり窓内に間に合う（仕様 s15 §8-3）。
+            // corner / runner は fail-fast 検証済み。プール空のときは artist=nil でスキップ準備物になる。
+            let corner = corners.first { $0.id == segment.cornerId }!
+            let runner = artistFeatureRunner
+            let selectedArtist = artist
+            let castDjIds = context.castDjIds
+            let leadIn = context.leadIn
+            ledger.addArtistFeature(at: index, Task {
+                guard let runner else {
+                    throw ConfigError.missingField("artistFeatureRunner が未配線です")
+                }
+                return try await runner.prepare(
+                    corner: corner, artist: selectedArtist, djs: djs, castDjIds: castDjIds, leadIn: leadIn)
             })
         case .news:
             let provider = newsProvider
@@ -392,6 +447,11 @@ public struct BroadcastEngine: Sendable {
         guestCornerId: String?,
         guest: DjProfile?
     ) -> CornerContext {
+        // アーティスト特集（仕様 s15）: その日の編成＋コーナーのリード文（{artist}/時刻は特集側で展開）。
+        if segment.kind == .artistFeature {
+            let leadIn = corners.first { $0.id == segment.cornerId }?.leadIn
+            return CornerContext(castDjIds: castDjIds, greeting: nil, leadIn: leadIn)
+        }
         guard segment.kind == .talk else { return CornerContext() }
         // ゲストコーナー（最初の news 直後に挿入された talk）: ゲストを cast 末尾に、リード文付き（仕様 s14）。
         if let guestCornerId, segment.cornerId == guestCornerId {
@@ -421,12 +481,16 @@ public struct BroadcastEngine: Sendable {
 private final class PreparationLedger: @unchecked Sendable {
     private let lock = NSLock()
     private var cornerTasks: [Int: Task<PreparedCorner, any Error>] = [:]
+    private var artistFeatureTasks: [Int: Task<PreparedArtistFeature, any Error>] = [:]
     private var newsTasks: [Int: Task<String, Never>] = [:]
     private var songTasks: [Int: Task<TrackInfo, Never>] = [:]
     private var preparedCorners: Set<Int> = []
 
     func addCorner(at index: Int, _ task: Task<PreparedCorner, any Error>) {
         lock.withLock { cornerTasks[index] = task }
+    }
+    func addArtistFeature(at index: Int, _ task: Task<PreparedArtistFeature, any Error>) {
+        lock.withLock { artistFeatureTasks[index] = task }
     }
     func addNews(at index: Int, _ task: Task<String, Never>) {
         lock.withLock { newsTasks[index] = task }
@@ -437,6 +501,9 @@ private final class PreparationLedger: @unchecked Sendable {
 
     func cornerTask(at index: Int) -> Task<PreparedCorner, any Error>? {
         lock.withLock { cornerTasks[index] }
+    }
+    func artistFeatureTask(at index: Int) -> Task<PreparedArtistFeature, any Error>? {
+        lock.withLock { artistFeatureTasks[index] }
     }
     func newsTask(at index: Int) -> Task<String, Never>? {
         lock.withLock { newsTasks[index] }
@@ -457,6 +524,7 @@ private final class PreparationLedger: @unchecked Sendable {
     func discard(_ index: Int) {
         lock.withLock {
             cornerTasks.removeValue(forKey: index)
+            artistFeatureTasks.removeValue(forKey: index)
             newsTasks.removeValue(forKey: index)
             songTasks.removeValue(forKey: index)
             preparedCorners.remove(index)
@@ -467,6 +535,7 @@ private final class PreparationLedger: @unchecked Sendable {
     func cancelAll(keeping kept: Int? = nil) {
         lock.withLock {
             for (index, task) in cornerTasks where index != kept { task.cancel() }
+            for (index, task) in artistFeatureTasks where index != kept { task.cancel() }
             for (index, task) in newsTasks where index != kept { task.cancel() }
             for (index, task) in songTasks where index != kept { task.cancel() }
         }

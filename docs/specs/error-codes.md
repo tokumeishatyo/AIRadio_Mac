@@ -3,7 +3,10 @@
 形式: `E-<CAT3>-<DETAIL>-<NNN>`。Swift では enum の case に安定コード文字列を持たせる（`RadioError.code`）。
 
 カテゴリ: CFG（設定）/ RTM（実行時）/ SPT（Spotify）/ TTS（VOICEVOX）/ LLM（Gemini・Gemma）/
-NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
+NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）/ ART（アーティスト特集）。
+
+ART は **実行時の特集スキップ専用**（fail-tolerant・throw しない・診断ログ用の安定コード）。
+特集の設定不正（コーナー不在・id 衝突・artists.yaml 破損）は既存 CFG（`E-CFG-MISSING-FIELD-001`）に寄せる。
 
 | コード | カテゴリ | 発生条件 | 導入スライス |
 |---|---|---|---|
@@ -23,3 +26,5 @@ NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）。
 | `E-LLM-EMPTY-RESPONSE-001` | LLM | LLM 応答にテキストがない | S6 |
 | `E-LLM-SCRIPT-PARSE-FAILED-001` | LLM | LLM 応答が台本として解釈できない（4 行未満） | S6 |
 | `E-RTM-SEGMENT-FAILED-001` | RTM | 放送セグメントが実行時エラーで中断（スキップして継続） | S7 |
+| `E-ART-EMPTY-POOL-001` | ART | アーティスト特集有効だが artists.yaml が空／未生成 → 特集スキップ（throw しない・診断ログ用） | S15 |
+| `E-ART-INSUFFICIENT-TRACKS-001` | ART | 再生可能曲が 3 曲未満 → 特集スキップ（throw しない・診断ログ用） | S15 |

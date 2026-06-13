@@ -15,11 +15,15 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
     private let stateItem = NSMenuItem(title: "停止中", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "放送を開始", action: nil, keyEquivalent: "")
     private let endingItem = NSMenuItem(title: "ED で終了", action: nil, keyEquivalent: "")
+    private let generateArtistsItem = NSMenuItem(title: "アーティスト一覧を生成", action: nil, keyEquivalent: "")
     private let lengthMenu = NSMenu()
     let session: BroadcastSession
     private var segmentCountLabel = "?"
     private var lastErrorCode: String?
     private var isBroadcasting = false
+    /// アーティスト一覧の生成中か（放送と相互排他。仕様 s15 §9-3）。
+    private var isGeneratingArtists = false
+    private var generateTask: Task<Void, Never>?
     /// 放送中の操作ハンドル（「ED で終了」用。放送開始時にセット、idle で破棄）。
     private var activeControl: BroadcastControl?
 
@@ -56,6 +60,11 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
         menu.addItem(lengthItem)
         refreshLengthCheckmarks()
 
+        // アーティスト一覧を生成（放送停止時のみ。生成中は放送開始を抑止＝相互排他。仕様 s15 §9-3）。
+        generateArtistsItem.target = self
+        generateArtistsItem.action = #selector(generateArtists)
+        menu.addItem(generateArtistsItem)
+
         menu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -82,6 +91,45 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
         stateItem.title = "放送中…（ED で終了します）"
     }
 
+    /// アーティスト一覧を生成（放送停止時のみ。生成中は放送開始を抑止＝相互排他。仕様 s15 §9-3）。
+    /// `artist-gen.yaml` の genre_prompt/target_count に従い LLM 生成 → Spotify 検証 → artists.yaml を上書き。
+    @objc private func generateArtists() {
+        guard !isBroadcasting, !isGeneratingArtists else { return }
+        isGeneratingArtists = true
+        generateArtistsItem.title = "アーティスト生成中…"
+        stateItem.title = "アーティスト一覧を生成中…"
+        generateTask = Task { [weak self] in
+            do {
+                let (generator, config) = try makeArtistListGenerator()
+                let count = try await generator.generate(config: config, writingTo: "config/artists.yaml")
+                self?.finishGenerating(result: .success(count))
+            } catch is CancellationError {
+                self?.finishGenerating(result: .success(-1))   // 中止
+            } catch {
+                self?.finishGenerating(result: .failure(error))
+            }
+        }
+    }
+
+    private func finishGenerating(result: Result<Int, any Error>) {
+        isGeneratingArtists = false
+        generateTask = nil
+        generateArtistsItem.title = "アーティスト一覧を生成"
+        switch result {
+        case .success(let count) where count >= 0:
+            stateItem.title = "停止中（アーティスト \(count) 組を生成）"
+        case .success:
+            stateItem.title = "停止中"   // 中止
+        case .failure(let error):
+            stateItem.title = "停止中（生成エラー）"
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "アーティスト一覧の生成に失敗しました"
+            alert.informativeText = String(describing: error)
+            alert.runModal()
+        }
+    }
+
     @objc private func selectLength(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String else { return }
         UserDefaults.standard.set(raw, forKey: programLengthDefaultsKey)
@@ -104,10 +152,15 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem === endingItem { return isBroadcasting && activeControl != nil }
+        // 生成中はボタン無効、放送中もボタン無効（相互排他）。
+        if menuItem === generateArtistsItem { return !isBroadcasting && !isGeneratingArtists }
+        // 生成中は「放送を開始」を無効化（放送中なら「停止」として有効）。
+        if menuItem === toggleItem { return isBroadcasting || !isGeneratingArtists }
         return true
     }
 
     private func startBroadcast() async {
+        guard !isGeneratingArtists else { return }   // 生成中は開始しない（相互排他）。
         let stack: BroadcastStack
         do {
             stack = try makeBroadcastStack(
@@ -115,7 +168,8 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
                     printBroadcastEvent(event)
                     Task { @MainActor in self?.apply(event: event) }
                 },
-                onCornerEvent: printCornerEvent
+                onCornerEvent: printCornerEvent,
+                onArtistFeatureEvent: printArtistFeatureEvent
             )
         } catch {
             showStartupError(error)

@@ -31,6 +31,7 @@ public enum ProgramConfigLoader {
             let news: News?
             let weekly_cast: [String: [String]]?
             let guest: Talk?
+            let artist_feature: Talk?
         }
         let program: ProgramSection?
     }
@@ -123,7 +124,8 @@ public enum ProgramConfigLoader {
             letterCornerId: letterCornerId,
             newsDjId: program.news?.dj_id,
             weeklyCast: try parseWeeklyCast(program.weekly_cast),
-            guestCornerId: program.guest?.corner_id
+            guestCornerId: program.guest?.corner_id,
+            artistFeatureCornerId: program.artist_feature?.corner_id
         )
     }
 

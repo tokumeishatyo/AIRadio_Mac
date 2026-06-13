@@ -321,7 +321,8 @@ func runBroadcastDemo() async {
     do {
         let stack = try makeBroadcastStack(
             onBroadcastEvent: printBroadcastEvent,
-            onCornerEvent: printCornerEvent
+            onCornerEvent: printCornerEvent,
+            onArtistFeatureEvent: printArtistFeatureEvent
         )
         let total = stack.plan.totalSegmentCount.map(String.init) ?? "∞"
         print("番組「\(stack.plan.title)」を開始します"

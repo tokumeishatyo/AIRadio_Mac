@@ -6,6 +6,8 @@ public enum SegmentKind: String, Sendable, Equatable, CaseIterable {
     case song
     case talk
     case news
+    /// アーティスト特集（仕様 s15）。talk とは曲数・進行が別物なので独立 case にする（意図的な非対称）。
+    case artistFeature
     case ending
 }
 
@@ -99,6 +101,9 @@ public struct ProgramBlueprint: Sendable, Equatable {
     /// ゲストコーナー（corners.yaml の id）。nil でゲストコーナー無効（仕様 s14 §3）。
     /// 設定すると最初の news の直後に 1 回だけゲスト talk が挿入される。
     public var guestCornerId: String?
+    /// アーティスト特集（corners.yaml の id、format: artist_feature）。nil で無効（仕様 s15 §3）。
+    /// 設定するとゲストコーナーの直後に 1 回だけ挿入される（ゲストに従属）。
+    public var artistFeatureCornerId: String?
 
     public init(
         title: String,
@@ -110,7 +115,8 @@ public struct ProgramBlueprint: Sendable, Equatable {
         letterCornerId: String,
         newsDjId: String? = nil,
         weeklyCast: WeeklyCast = .standard,
-        guestCornerId: String? = nil
+        guestCornerId: String? = nil,
+        artistFeatureCornerId: String? = nil
     ) {
         self.title = title
         self.anchorDjId = anchorDjId
@@ -122,6 +128,7 @@ public struct ProgramBlueprint: Sendable, Equatable {
         self.newsDjId = newsDjId
         self.weeklyCast = weeklyCast
         self.guestCornerId = guestCornerId
+        self.artistFeatureCornerId = artistFeatureCornerId
     }
 }
 
@@ -174,11 +181,11 @@ public struct ProgramPlan: Sendable, Equatable {
     public var title: String { blueprint.title }
     public var anchorDjId: String { blueprint.anchorDjId }
 
-    /// 総セグメント数（エンドレスは nil。UI の「n/全体」表示用）。ゲストコーナーがあれば +1。
+    /// 総セグメント数（エンドレスは nil。UI の「n/全体」表示用）。ゲスト・特集があれば各 +1。
     public var totalSegmentCount: Int? {
         guard case .corners(let n) = length else { return nil }
-        // OP + song + 本編（ペア×4 + 端数）+ ED（+ ゲスト 1）
-        return 2 + (n / 2) * 4 + (n % 2) + 1 + (includesGuestCorner ? 1 : 0)
+        // OP + song + 本編（ペア×4 + 端数）+ ED（+ ゲスト 1 + 特集 1）
+        return 2 + (n / 2) * 4 + (n % 2) + 1 + (includesGuestCorner ? 1 : 0) + (includesArtistFeature ? 1 : 0)
     }
 
     /// この番組がゲストコーナーを実際に含むか（guestCornerId 設定 かつ 最初の news が存在＝N≥2 / エンドレス。仕様 s14 §3）。
@@ -191,8 +198,21 @@ public struct ProgramPlan: Sendable, Equatable {
         }
     }
 
+    /// この番組がアーティスト特集を実際に含むか（artistFeatureCornerId 設定 かつ ゲストコーナーが入る＝従属。仕様 s15 §3）。
+    public var includesArtistFeature: Bool {
+        blueprint.artistFeatureCornerId != nil && includesGuestCorner
+    }
+
     /// ゲスト talk が入る body 位置（最初の news の次 = body 4）。挿入しないなら nil。
     private var guestBodyPosition: Int? { includesGuestCorner ? 4 : nil }
+
+    /// アーティスト特集が入る body 位置（ゲストの次 = body 5）。挿入しないなら nil。
+    private var artistFeatureBodyPosition: Int? { includesArtistFeature ? 5 : nil }
+
+    /// body 位置より手前にある割り込み（ゲスト・特集）の個数。素のパターン参照の補正に使う（仕様 s15 §3-3）。
+    private func insertionsBefore(_ body: Int) -> Int {
+        [guestBodyPosition, artistFeatureBodyPosition].compactMap { $0 }.filter { $0 < body }.count
+    }
 
     /// index 番目のセグメント（0 始まり）。有限番組は ED の次で nil、エンドレスは常に非 nil。
     public func segment(at index: Int) -> ProgramSegment? {
@@ -208,16 +228,16 @@ public struct ProgramPlan: Sendable, Equatable {
         }
     }
 
-    /// 本編 body の index → セグメント。ゲストコーナーが有効なら最初の news の次（body 4）に
-    /// ゲスト talk を割り込ませ、以降の位置を 1 つ後ろの素のパターンへ写す（仕様 s14 §3）。
+    /// 本編 body の index → セグメント。割り込み（ゲスト body4・特集 body5）を順に差し込み、
+    /// それ以外は「割り込みを除いた素 body」でパターンを参照する（`insertionsBefore` に一本化、仕様 s15 §3-3）。
     private func bodySegment(at body: Int) -> ProgramSegment? {
-        guard let guestPos = guestBodyPosition else {
-            return patternBodySegment(at: body)
-        }
-        if body == guestPos {
+        if let guestPos = guestBodyPosition, body == guestPos {
             return ProgramSegment(kind: .talk, cornerId: blueprint.guestCornerId)
         }
-        return patternBodySegment(at: body < guestPos ? body : body - 1)
+        if let featurePos = artistFeatureBodyPosition, body == featurePos {
+            return ProgramSegment(kind: .artistFeature, cornerId: blueprint.artistFeatureCornerId, critical: false)
+        }
+        return patternBodySegment(at: body - insertionsBefore(body))
     }
 
     /// ゲスト挿入を考慮しない素の本編 body（`talk, talk, letter, news` の繰り返し + 端数 + ED）。

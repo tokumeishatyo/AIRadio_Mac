@@ -49,11 +49,14 @@ struct BroadcastStack {
     let corners: [CornerTemplate]
     let djs: [DjProfile]
     let guests: [DjProfile]
+    /// アーティスト特集のプール（artists.yaml。空＝特集スキップ。仕様 s15）。
+    let artists: [ArtistProfile]
     /// 放送中の操作（「ED で終了」）。
     let control: BroadcastControl
 
     func run() async throws {
-        try await engine.run(plan: plan, corners: corners, djs: djs, guests: guests, control: control)
+        try await engine.run(
+            plan: plan, corners: corners, djs: djs, guests: guests, artists: artists, control: control)
     }
 }
 
@@ -61,7 +64,8 @@ struct BroadcastStack {
 /// 開始のたびに呼ぶことで YAML の編集が次の放送から反映される。
 func makeBroadcastStack(
     onBroadcastEvent: (@Sendable (BroadcastEvent) -> Void)? = nil,
-    onCornerEvent: (@Sendable (CornerEvent) -> Void)? = nil
+    onCornerEvent: (@Sendable (CornerEvent) -> Void)? = nil,
+    onArtistFeatureEvent: (@Sendable (ArtistFeatureEvent) -> Void)? = nil
 ) throws -> BroadcastStack {
     let blueprint = try ProgramConfigLoader.load(path: "config/program.yaml")
     let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
@@ -74,6 +78,8 @@ func makeBroadcastStack(
     let guests: [DjProfile] = FileManager.default.fileExists(atPath: "config/guests.yaml")
         ? try GuestsConfigLoader.load(path: "config/guests.yaml")
         : []
+    // アーティスト特集のプール（仕様 s15）。出荷時は空＝特集スキップ。壊れている場合のみ throw。
+    let artists = try ArtistsConfigLoader.load(path: "config/artists.yaml")
     let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
     let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
 
@@ -98,6 +104,17 @@ func makeBroadcastStack(
         temperature: llmConfig.temperature,
         onEvent: onCornerEvent
     )
+    // アーティスト特集の実行（仕様 s15）。top-tracks は SpotifyArtistCatalog（market は spotify.local.yaml）。
+    let artistFeatureEngine = ArtistFeatureEngine(
+        llm: GeminiLLMBackend(config: llmConfig, http: http),
+        tts: tts,
+        audio: audio,
+        catalog: SpotifyArtistCatalog(auth: auth, market: spotifyConfig.market, http: http),
+        spotify: spotify,
+        clock: clock,
+        temperature: llmConfig.temperature,
+        onEvent: onArtistFeatureEvent
+    )
     // ニュース原稿は LLM アナウンサー原稿（S11）。読み手（news の dj_id、なければ anchor）のペルソナを使う。
     let newsDjId = blueprint.newsDjId ?? blueprint.anchorDjId
     let newsPersona = djs.first { $0.id == newsDjId }?.persona ?? ""
@@ -118,6 +135,7 @@ func makeBroadcastStack(
         ),
         themeSequencer: ThemeSequencer(tts: tts, audio: audio, spotify: spotify, clock: clock),
         cornerRunner: cornerEngine,
+        artistFeatureRunner: artistFeatureEngine,
         newsProvider: newsProvider,
         songPicker: SongPicker(
             llm: GeminiLLMBackend(config: llmConfig, http: http),
@@ -132,7 +150,46 @@ func makeBroadcastStack(
         blueprint: blueprint,
         length: selectedProgramLength(defaultLength: blueprint.defaultLength)
     )
-    return BroadcastStack(engine: engine, plan: plan, corners: corners, djs: djs, guests: guests, control: BroadcastControl())
+    return BroadcastStack(
+        engine: engine, plan: plan, corners: corners, djs: djs,
+        guests: guests, artists: artists, control: BroadcastControl())
+}
+
+/// アーティスト一覧の生成器と設定（メニュー「アーティスト一覧を生成」用。仕様 s15 §9-3）。
+/// LLM + Spotify 検索のみ（TTS・再生デバイス不要）。
+func makeArtistListGenerator() throws -> (generator: ArtistListGenerator, config: ArtistGenConfig) {
+    let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
+    let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    let http = URLSessionHTTPClient()
+    let auth = try makeSpotifyAuth()
+    let generator = ArtistListGenerator(
+        llm: GeminiLLMBackend(config: llmConfig, http: http),
+        catalog: SpotifyArtistCatalog(auth: auth, market: spotifyConfig.market, http: http)
+    )
+    let genConfig = try ArtistGenConfigLoader.load(path: "config/artist-gen.yaml")
+    return (generator, genConfig)
+}
+
+/// アーティスト特集進行のコンソール出力（仕様 s15）。
+@Sendable func printArtistFeatureEvent(_ event: ArtistFeatureEvent) {
+    switch event {
+    case .artistSelected(let name):
+        print("  🎤 本日のアーティスト: \(name)")
+    case .tracksPrepared(let count):
+        print("  🎵 特集曲: \(count) 曲")
+    case .partScriptReady(let lineCount, let totalCharacters):
+        print("  台本: \(lineCount) 行 / \(totalCharacters) 文字")
+    case .leadIn(let text):
+        print("  ⏱ リード文: \(text)")
+    case .line(let line):
+        print("    \(line.djId): \(line.text)")
+    case .songStarted(let track):
+        print("  ♪ \(track.title.isEmpty ? track.uri : "\(track.artist) / \(track.title)")")
+    case .songFinished(let reason):
+        print("  ♪ 曲終了（検知: \(reason.rawValue)）")
+    case .featureSkipped(let reason):
+        print("  ⏭ アーティスト特集をスキップ: \(reason)")
+    }
 }
 
 /// コーナー進行のコンソール出力（デモ・常駐どちらでも進行ログとして使う）。

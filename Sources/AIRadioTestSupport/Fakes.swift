@@ -128,6 +128,56 @@ public final class FakeCornerRunner: CornerRunning, @unchecked Sendable {
     }
 }
 
+/// アーティスト名ごとに固定の top-tracks を返す ArtistCatalog（仕様 s15）。要求名を記録する。
+public final class FakeArtistCatalog: ArtistCatalog, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requested: [String] = []
+    private let byArtist: [String: [TrackInfo]]
+    private let fallback: [TrackInfo]
+    public init(byArtist: [String: [TrackInfo]] = [:], fallback: [TrackInfo] = []) {
+        self.byArtist = byArtist
+        self.fallback = fallback
+    }
+    public var requested: [String] { lock.withLock { _requested } }
+    public func topTracks(artistName: String, limit: Int) async throws -> [TrackInfo] {
+        lock.withLock { _requested.append(artistName) }
+        return Array((byArtist[artistName] ?? fallback).prefix(limit))
+    }
+}
+
+/// アーティスト特集の準備・実行を記録する ArtistFeatureRunning（BroadcastEngine 統合テスト用、仕様 s15）。
+public final class FakeArtistFeatureRunner: ArtistFeatureRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _preparedArtistNames: [String?] = []   // nil = プール空
+    private var _ranSkipped: [Bool] = []
+    public init() {}
+    public var preparedArtistNames: [String?] { lock.withLock { _preparedArtistNames } }
+    public var ranSkipped: [Bool] { lock.withLock { _ranSkipped } }
+
+    public func prepare(
+        corner: CornerTemplate, artist: ArtistProfile?, djs: [DjProfile],
+        castDjIds: [String], leadIn: String?
+    ) async throws -> PreparedArtistFeature {
+        lock.withLock { _preparedArtistNames.append(artist?.name) }
+        guard let artist else {
+            return .skip(corner: corner, castDjIds: castDjIds, reason: "E-ART-EMPTY-POOL-001")
+        }
+        return PreparedArtistFeature(
+            corner: corner, artist: artist,
+            groups: [[TrackInfo(uri: "spotify:track:AF", title: "T", artist: artist.name)]],
+            introScript: DialogueScript(lines: []), introAudio: [],
+            groupIntroScripts: [], groupIntroAudio: [],
+            commentScripts: [], commentAudio: [],
+            outroLine: DialogueLine(djId: "", text: ""), outroAudio: Data(),
+            castDjIds: castDjIds, leadIn: leadIn, leadInSpeakerId: 0
+        )
+    }
+
+    public func run(prepared: PreparedArtistFeature, djs: [DjProfile]) async throws {
+        lock.withLock { _ranSkipped.append(prepared.skipped) }
+    }
+}
+
 /// 固定の選曲結果（またはエラー）を返す SongPicking。依頼内容を記録する。
 public final class FakeSongPicker: SongPicking, @unchecked Sendable {
     private let lock = NSLock()

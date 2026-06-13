@@ -77,3 +77,22 @@ corners:
     fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
     volume: 100
     play_seconds: 0
+  # アーティスト特集（format: artist_feature、仕様 s15）。ゲストコーナーの直後に 1 回だけ挿入される。
+  # アーティストは artists.yaml からランダム選定。そのアーティストの最大 7 曲を 3+3+1 で（プレフライト後に縮約）。
+  # 曲は実行時に Spotify の top-tracks から取得するので theme/themes/song_prompt_hint は使わない（ローダ要件で記載）。
+  # lead_in の {artist} は準備時、時刻は発話直前に展開。{guest}/{theme} は使わない。
+  - id: artist_feature
+    title: "アーティスト特集"
+    format: artist_feature
+    lead_in: "{ampm}{hour}時{minute}分になりました。ここからはアーティスト特集です。本日は{artist}さんを特集します。"
+    theme: "アーティスト特集"
+    dj_ids: [zundamon, metan]
+    fallback_track_uri: "spotify:track:5jsqaNOAbeBG5QYL7JpySJ"
+    volume: 100
+    play_seconds: 0
+    # パート別の目標文字数。comment_short_target_chars < comment_target_chars は必須（2 回目の感想は短め）。
+    intro_target_chars: 200
+    group_intro_target_chars: 320
+    comment_target_chars: 400
+    comment_short_target_chars: 240
+    outro_line: "以上、アーティスト特集でした。"

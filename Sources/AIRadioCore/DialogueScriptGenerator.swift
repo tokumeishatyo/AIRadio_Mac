@@ -127,17 +127,73 @@ public struct DialogueScriptGenerator: Sendable {
         return LLMRequest(prompt: sections.joined(separator: "\n\n"), system: system, temperature: temperature)
     }
 
+    /// アーティスト特集（仕様 s15）の発話パート別 LLM リクエスト。各パートを個別生成する。
+    /// 曲名は与えられた表記をそのまま使わせる（プレフライト済みの実曲名と一致＝紹介と再生の不一致を防ぐ）。
+    public static func makeArtistFeatureRequest(
+        part: ArtistFeaturePart,
+        artistName: String,
+        djs: [DjProfile],
+        dateContext: String = "",
+        targetCharacters: Int,
+        temperature: Double = 0.9
+    ) -> LLMRequest {
+        let names = djs.map(\.name).joined(separator: "」「")
+        let main = djs.first?.name ?? names
+        let profiles = djs.map { "- \($0.name): \($0.persona)" }.joined(separator: "\n")
+
+        var sections: [String]
+        var constraints: [String] = [
+            "セリフの合計は \(targetCharacters) 文字以上、\(targetCharacters * 12 / 10) 文字以内。短すぎる台本は不可。",
+            "出力は台本のみ。1 行につき 1 つのセリフを「DJ名: セリフ」の形式で書く。",
+            "DJ名は「\(names)」のみ。ナレーション、ト書き、見出し、記号装飾は書かない。",
+            "進行はメイン「\(main)」が主導し、ほかの出演者は相槌・ツッコミ・応答で自然に返す。それぞれの口調を守る。",
+            "これは番組の途中。挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める。",
+        ]
+        switch part {
+        case .intro:
+            sections = ["ラジオ番組のアーティスト特集の「導入」の会話台本を書いてください。"]
+            constraints.append("メイン「\(main)」が『ここからはアーティスト特集』と宣言し、本日特集するアーティスト「\(artistName)」への思いや好きなところを一言添える。")
+            constraints.append("まだ曲名には触れない（曲の紹介は次のパートで行う）。")
+        case .groupIntro(let tracks):
+            let list = tracks.map { "「\($0.title)」（\($0.artist)）" }.joined(separator: "、")
+            sections = ["ラジオ番組のアーティスト特集で、これから連続で流す \(tracks.count) 曲をまとめて紹介する会話台本を書いてください。"]
+            sections.append("# 紹介する曲（この順で）\n\(list)")
+            constraints.append("上の曲を順に紹介する。曲名・アーティスト名は与えられた表記を一字一句そのまま言い、言い換え・推測・別情報の捏造をしない。")
+            constraints.append("各曲に聴きどころを軽く添え、最後は曲へ送り出して締める。")
+        case .comment(let shorter):
+            sections = ["ラジオ番組のアーティスト特集で、今流した曲を聴いたあとの感想・雑談の会話台本を書いてください。"]
+            constraints.append(shorter
+                ? "前の感想より短く、テンポよくまとめる。"
+                : "出演者で曲やアーティストの感想を自由に話す（少し脱線してよい）。")
+            constraints.append("次の曲紹介には踏み込まない（紹介は別パートで行う）。")
+        }
+        if !dateContext.isEmpty {
+            sections.append("# 今日の日付と季節\n\(dateContext)")
+            constraints.append("季節や時候の話に触れるなら、上の日付・季節に合わせる。")
+        }
+        sections.append("# 制約\n" + constraints.map { "- \($0)" }.joined(separator: "\n"))
+
+        let system = """
+        あなたはラジオ番組「ケイラボAIラジオ」の放送作家です。
+        リスナーが作業しながら聴ける、肩の力の抜けた楽しい会話を書きます。
+
+        # 出演DJ
+        \(profiles)
+        """
+        return LLMRequest(prompt: sections.joined(separator: "\n\n"), system: system, temperature: temperature)
+    }
+
     // MARK: - パース
 
-    public static func parse(_ raw: String, djs: [DjProfile]) throws -> DialogueScript {
+    public static func parse(_ raw: String, djs: [DjProfile], minLines: Int = 4) throws -> DialogueScript {
         var lines: [DialogueLine] = []
         for rawLine in raw.split(separator: "\n", omittingEmptySubsequences: true) {
             if let line = parseLine(String(rawLine), djs: djs) {
                 lines.append(line)
             }
         }
-        guard lines.count >= 4 else {
-            throw LLMError.scriptParseFailed("セリフが \(lines.count) 行しか取れませんでした")
+        guard lines.count >= minLines else {
+            throw LLMError.scriptParseFailed("セリフが \(lines.count) 行しか取れませんでした（最低 \(minLines) 行）")
         }
         return DialogueScript(lines: lines)
     }

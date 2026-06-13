@@ -156,6 +156,22 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("相槌・ツッコミ・応答"))
     }
 
+    @Test("語尾の混線を禁止する指示が入る（メインの語尾を他の出演者に伝染させない、s15 fix）")
+    func forbidsSpeechStyleBleed() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: threeCast, song: song)
+        #expect(request.prompt.contains("自分の一人称・口調・語尾だけを使う"))
+        #expect(request.prompt.contains("伝染させない"))
+    }
+
+    @Test("アーティスト特集パートも語尾の混線を禁止する（s15 fix）")
+    func artistFeatureForbidsSpeechStyleBleed() {
+        let request = DialogueScriptGenerator.makeArtistFeatureRequest(
+            part: .intro, artistName: "米津玄師", djs: threeCast, targetCharacters: 200)
+        #expect(request.prompt.contains("自分の一人称・口調・語尾だけを使う"))
+        #expect(request.prompt.contains("伝染させない"))
+    }
+
     @Test("greeting 非 nil（冒頭）: 時刻連動の挨拶＋番組名＋出演者紹介を指示")
     func greetingPromptForOpeningCorner() {
         let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")

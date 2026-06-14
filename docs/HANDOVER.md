@@ -301,6 +301,12 @@ DailyContext 軽重、§11不採用一覧に4件）→ ハブ整合 → ② **S1
 （読み正確化＝中・選曲多様化A＝低だが“毎放送の不満を消す”枠なので早め差し込み可）。
 
 ## 11. 今後の検討課題（今はやらない）
+- **VOICEVOX エンジンの自動起動管理**（2026-06-14・完成形監査、要件§11 後回し）: 現状は利用者が手動起動（BYO、§5）。未起動時は
+  `TtsError.unreachable`→「VOICEVOX を起動してください」で促す。将来 `NSWorkspace.open` 等で VOICEVOX.app を自動起動する余地
+  （config/tts.yaml に任意の `launch_command` を足す Windows 踏襲案）。要件 v1.3 で §3「自動起動管理」を §11 後回しに整理済み。
+- **状態表示行のセグメント種別の日本語化**（2026-06-14・完成形監査、要件§11 後回し）: `MenuBar.swift` の状態行が
+  `SegmentKind.rawValue`（opening/song/talk/news/artistFeature/ending＝英語）をそのまま表示（「放送中: artistFeature (n/m)」）。
+  `SegmentKind` に日本語表示名（または §4-1 準拠で corners.yaml 等から引く）を 1 箇所足して差し替える小改善。s9 受け入れ条件には含まれずブロッカーではない。
 - **Windows 版再実装の可搬性**（2026-06-14 監査済み・別途まとめ予定）: 将来 Windows 版を別言語で再作成予定。理想
   「config 持参で同じ番組」は**部分的にしか成立しない**（LLM プロンプトが Core にハードコード＝唯一の綻び。番組名
   「ケイラボAIラジオ」直書き4箇所は最小修正候補）。Core+protocol 設計自体は cross-platform に正解。**本 Mac プログラム

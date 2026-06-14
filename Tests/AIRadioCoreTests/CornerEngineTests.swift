@@ -218,8 +218,23 @@ struct CornerEngineS12Tests {
     func injectsDateContextIntoScriptPrompt() async throws {
         let fixture = Fixture()
         _ = try await fixture.engine.prepare(corner: corner(), djs: djs)
-        #expect(fixture.llm.requests[1].prompt.contains("今日は1月1日、冬、正月明けです。"))
+        #expect(fixture.llm.requests[1].prompt.contains("今日は1月1日（木曜日）、冬、正月明けです。"))
         #expect(fixture.llm.requests[1].prompt.contains("季節や時候の話は、上の日付・季節に合わせる"))
+    }
+
+    @Test("s17: 注入した DailyCalendar の記念日（high）が台本プロンプトに入る")
+    func injectsAnniversaryFromDailyCalendar() async throws {
+        // RecordingClock.now = epoch = 1970-01-01。元日(high)を登録した DailyCalendar を注入。
+        let fixture = Fixture()
+        let engine = CornerEngine(
+            llm: fixture.llm, tts: fixture.tts, audio: fixture.audio,
+            searcher: fixture.searcher, spotify: fixture.spotify, clock: fixture.clock,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            dailyCalendar: DailyCalendar(anniversaries: [Anniversary(month: 1, day: 1, name: "元日", significance: .high)])
+        )
+        _ = try await engine.prepare(corner: corner(), djs: djs)
+        #expect(fixture.llm.requests[1].prompt.contains("今日は『元日』。"))
+        #expect(fixture.llm.requests[1].prompt.contains("番組を通して"))
     }
 
     @Test("letter: お便り生成 → 選曲 → 台本の 3 段 LLM 呼び出し（お便り内容が選曲コンテキストに入る）")
@@ -239,7 +254,7 @@ struct CornerEngineS12Tests {
         // ① お便り生成（テーマ + 季節）
         #expect(fixture.llm.requests[0].prompt.contains("お便り"))
         #expect(fixture.llm.requests[0].prompt.contains("季節の楽しみ"))
-        #expect(fixture.llm.requests[0].prompt.contains("今日は1月1日、冬、正月明けです。"))
+        #expect(fixture.llm.requests[0].prompt.contains("今日は1月1日（木曜日）、冬、正月明けです。"))
         // ② 選曲（お便り内容がコンテキスト。プレフライトは従来どおり）
         #expect(fixture.llm.requests[1].prompt.contains("リクエスト曲"))
         #expect(fixture.llm.requests[1].prompt.contains("梅雨の散歩で紫陽花を見つけました"))

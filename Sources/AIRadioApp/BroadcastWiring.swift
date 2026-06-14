@@ -80,6 +80,10 @@ func makeBroadcastStack(
         : []
     // アーティスト特集のプール（仕様 s15）。出荷時は空＝特集スキップ。壊れている場合のみ throw。
     let artists = try ArtistsConfigLoader.load(path: "config/artists.yaml")
+    // 暦コンテキスト（曜日名・記念日。仕様 s17）。ファイルが無ければ標準（曜日名のみ・記念日なし）。
+    let dailyCalendar: DailyCalendar = FileManager.default.fileExists(atPath: "config/calendar.yaml")
+        ? try DailyCalendarLoader.load(path: "config/calendar.yaml")
+        : .standard
     let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
     let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
 
@@ -102,6 +106,7 @@ func makeBroadcastStack(
         spotify: spotify,
         clock: clock,
         temperature: llmConfig.temperature,
+        dailyCalendar: dailyCalendar,
         onEvent: onCornerEvent
     )
     // アーティスト特集の実行（仕様 s15）。top-tracks は SpotifyArtistCatalog（market は spotify.local.yaml）。
@@ -113,6 +118,7 @@ func makeBroadcastStack(
         spotify: spotify,
         clock: clock,
         temperature: llmConfig.temperature,
+        dailyCalendar: dailyCalendar,
         onEvent: onArtistFeatureEvent
     )
     // ニュース原稿は LLM アナウンサー原稿（S11）。読み手（news の dj_id、なければ anchor）のペルソナを使う。

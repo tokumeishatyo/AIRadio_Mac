@@ -148,6 +148,8 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
     private let clock: any Clock
     private let temperature: Double
     private let timeZone: TimeZone
+    /// 暦コンテキスト（曜日名・記念日。仕様 s17。config 省略時は `.standard`）。
+    private let dailyCalendar: DailyCalendar
     private let onEvent: (@Sendable (ArtistFeatureEvent) -> Void)?
 
     public init(
@@ -159,6 +161,7 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
         clock: any Clock,
         temperature: Double = 0.9,
         timeZone: TimeZone = .current,
+        dailyCalendar: DailyCalendar = .standard,
         onEvent: (@Sendable (ArtistFeatureEvent) -> Void)? = nil
     ) {
         self.llm = llm
@@ -169,6 +172,7 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
         self.clock = clock
         self.temperature = temperature
         self.timeZone = timeZone
+        self.dailyCalendar = dailyCalendar
         self.onEvent = onEvent
     }
 
@@ -201,7 +205,7 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
         }
         let groups = Self.splitGroups(tracks)
         let params = corner.artistFeatureParams ?? ArtistFeatureParams()
-        let dateContext = SeasonPhrases.dateContext(date: clock.now, timeZone: timeZone)
+        let dateContext = dailyCalendar.context(date: clock.now, timeZone: timeZone)
 
         // パート別台本（導入 → 各グループ紹介 → 各感想。締めは固定文）。
         let introScript = try await generatePart(.intro, artist: artist, cast: cast,

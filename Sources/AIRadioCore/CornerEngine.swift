@@ -66,6 +66,8 @@ public struct CornerEngine: CornerRunning, Sendable {
     private let clock: any Clock
     private let temperature: Double
     private let timeZone: TimeZone
+    /// 暦コンテキスト（曜日名・記念日。仕様 s17。config 省略時は `.standard`）。
+    private let dailyCalendar: DailyCalendar
     /// テーマプールからの選択用乱数（0..<count のインデックスを返す。テストでは決定論的に注入）。
     private let randomIndex: @Sendable (Int) -> Int
     private let onEvent: (@Sendable (CornerEvent) -> Void)?
@@ -79,6 +81,7 @@ public struct CornerEngine: CornerRunning, Sendable {
         clock: any Clock,
         temperature: Double = 0.9,
         timeZone: TimeZone = .current,
+        dailyCalendar: DailyCalendar = .standard,
         randomIndex: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) },
         onEvent: (@Sendable (CornerEvent) -> Void)? = nil
     ) {
@@ -90,6 +93,7 @@ public struct CornerEngine: CornerRunning, Sendable {
         self.clock = clock
         self.temperature = temperature
         self.timeZone = timeZone
+        self.dailyCalendar = dailyCalendar
         self.randomIndex = randomIndex
         self.onEvent = onEvent
     }
@@ -103,7 +107,7 @@ public struct CornerEngine: CornerRunning, Sendable {
         let baseCast = try resolveCast(ids: castIds, djs: djs)
         let theme = selectTheme(for: corner)
         onEvent?(.themeSelected(theme))
-        let dateContext = SeasonPhrases.dateContext(date: clock.now, timeZone: timeZone)
+        let dateContext = dailyCalendar.context(date: clock.now, timeZone: timeZone)
         let picker = SongPicker(llm: llm, searcher: searcher, temperature: temperature)
         let generator = DialogueScriptGenerator(llm: llm, temperature: temperature)
 

@@ -150,6 +150,9 @@ func makeBroadcastStack(
         ),
         spotify: spotify,
         clock: clock,
+        // 長期記憶（仕様 s18）: config/journal.local.yaml に週次でハイライトを記録し冒頭で振り返る。
+        journalStore: YamlJournalStore(path: "config/journal.local.yaml"),
+        journalSummarizer: JournalSummarizer(llm: GeminiLLMBackend(config: llmConfig, http: http)),
         onEvent: onBroadcastEvent
     )
     let plan = ProgramPlan(

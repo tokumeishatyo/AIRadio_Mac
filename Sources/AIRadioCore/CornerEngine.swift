@@ -149,7 +149,8 @@ public struct CornerEngine: CornerRunning, Sendable {
         let script = try await generator.generate(
             corner: corner, djs: cast, song: song,
             theme: theme, dateContext: dateContext, letter: letter,
-            greeting: context.greeting, guest: guest
+            greeting: context.greeting, guest: guest,
+            journalContext: context.journalContext ?? ""
         )
         onEvent?(.scriptReady(lineCount: script.lines.count, totalCharacters: script.totalCharacters))
 

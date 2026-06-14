@@ -20,12 +20,13 @@ public struct DialogueScriptGenerator: Sendable {
         dateContext: String = "",
         letter: ListenerLetter? = nil,
         greeting: String? = nil,
-        guest: DjProfile? = nil
+        guest: DjProfile? = nil,
+        journalContext: String = ""
     ) async throws -> DialogueScript {
         let request = Self.makeRequest(
             corner: corner, djs: djs, song: song,
             theme: theme, dateContext: dateContext, letter: letter,
-            greeting: greeting, guest: guest, temperature: temperature
+            greeting: greeting, guest: guest, journalContext: journalContext, temperature: temperature
         )
         let raw = try await llm.generate(request)
         return try Self.parse(raw, djs: djs)
@@ -45,6 +46,7 @@ public struct DialogueScriptGenerator: Sendable {
         letter: ListenerLetter? = nil,
         greeting: String? = nil,
         guest: DjProfile? = nil,
+        journalContext: String = "",
         temperature: Double = 0.9
     ) -> LLMRequest {
         let selectedTheme = theme ?? corner.theme
@@ -87,6 +89,13 @@ public struct DialogueScriptGenerator: Sendable {
             \(dateContext)
             """)
         }
+        // 前回までの振り返り（長期記憶。冒頭コーナーのみ＝BroadcastEngine が opening の context にだけ設定。仕様 s18 §6）。
+        if !journalContext.isEmpty {
+            sections.append("""
+            # 前回までの番組の振り返り
+            \(journalContext)
+            """)
+        }
 
         var constraints = [
             "セリフの合計は \(corner.targetCharacters) 文字以上、\(corner.targetCharacters * 12 / 10) 文字以内（\(corner.targetMinutes) 分程度の会話）。短すぎる台本は不可。",
@@ -103,6 +112,10 @@ public struct DialogueScriptGenerator: Sendable {
             // 挨拶は挨拶語にとどめ、具体的な時刻・時間帯を断定させない（正確な時刻は他コーナーの時報が発話直前に読むため、
             // ここで「深夜」「◯時」等と言うと実際とズレる。s16/s17 ライブで「深夜」誤発言を確認）。
             constraints.append("挨拶は「\(greeting)」のような挨拶語にとどめ、『深夜』『夕方』『◯時』など具体的な時刻・時間帯は断定しない（正確な時刻はこの場面では言わない）。")
+            // 長期記憶（仕様 s18 §6）。前回の振り返りがあれば軽く一言だけ触れる（長々と振り返らない）。
+            if !journalContext.isEmpty {
+                constraints.append("冒頭で、前回までの放送の振り返り（上記）に軽く一言だけ触れてから本題へ入る（長々と振り返らない）。")
+            }
         } else {
             constraints.append("これは番組の途中のコーナー。挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める。")
         }

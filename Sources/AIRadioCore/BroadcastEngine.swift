@@ -39,6 +39,10 @@ public struct BroadcastEngine: Sendable {
     private let timeZone: TimeZone
     /// ゲスト・特集アーティスト選定用の乱数（0..<count のインデックス。テストは決定論的に注入。仕様 s14/s15）。
     private let randomIndex: @Sendable (Int) -> Int
+    /// 長期記憶の永続化（nil＝ジャーナル無効。仕様 s18）。
+    private let journalStore: (any JournalStore)?
+    /// ハイライト要約器（nil＝ジャーナル無効。仕様 s18）。
+    private let journalSummarizer: JournalSummarizer?
     private let onEvent: (@Sendable (BroadcastEvent) -> Void)?
 
     public init(
@@ -52,6 +56,8 @@ public struct BroadcastEngine: Sendable {
         clock: any Clock,
         timeZone: TimeZone = .current,
         randomIndex: @escaping @Sendable (Int) -> Int = { Int.random(in: 0..<$0) },
+        journalStore: (any JournalStore)? = nil,
+        journalSummarizer: JournalSummarizer? = nil,
         onEvent: (@Sendable (BroadcastEvent) -> Void)? = nil
     ) {
         self.themes = themes
@@ -64,6 +70,8 @@ public struct BroadcastEngine: Sendable {
         self.clock = clock
         self.timeZone = timeZone
         self.randomIndex = randomIndex
+        self.journalStore = journalStore
+        self.journalSummarizer = journalSummarizer
         self.onEvent = onEvent
     }
 
@@ -172,6 +180,10 @@ public struct BroadcastEngine: Sendable {
         let firstTalkIndex = Self.firstTalkIndex(in: plan)
         // 冒頭コーナーの時刻連動の挨拶語（準備時点で解決。再生まで数分なので時間帯ズレはほぼ無い）。
         let greeting = TimePhrases.values(date: clock.now, greetings: themes.greetings, timeZone: timeZone)["greeting"]
+        // 前回までの振り返り（長期記憶。当週のハイライトを冒頭コーナーの準備に渡す。仕様 s18 §6。読み込み失敗は無視＝fail-tolerant）。
+        let recentEntries = (journalStore.flatMap { try? $0.load() })?
+            .entriesForCurrentWeek(now: clock.now, timeZone: timeZone) ?? []
+        let journalContext = Self.journalContext(from: recentEntries)
 
         // ローリング準備の起動（単一消費者なので進捗はローカル変数で追う）。
         var preparationStartedThrough = -1
@@ -183,7 +195,8 @@ public struct BroadcastEngine: Sendable {
                 let context = cornerContext(
                     for: segment, at: index, corners: corners,
                     castDjIds: castDjIds, firstTalkIndex: firstTalkIndex, greeting: greeting,
-                    guestCornerId: plan.blueprint.guestCornerId, guest: guest)
+                    guestCornerId: plan.blueprint.guestCornerId, guest: guest,
+                    journalContext: journalContext)
                 startPreparation(of: segment, at: index, plan: plan, corners: corners, djs: djs, context: context, artist: artist, ledger: ledger)
             }
         }
@@ -239,7 +252,41 @@ public struct BroadcastEngine: Sendable {
         }
         // 各セグメントも自前で pause するが、エンジンでも重ねて完全静寂を保証する。
         try? await spotify.pause()
+        // 長期記憶（仕様 s18）: 正常終了した回のみハイライトを記録（停止/キャンセルはこの経路に来ない＝記録しない）。
+        await saveJournal(guest: guest, artist: artist)
         onEvent?(.broadcastFinished)
+    }
+
+    /// 番組終了時（正常終了のみ）に、その回のハイライトを要約してジャーナルへ追記（仕様 s18 §3）。
+    /// 完全 fail-tolerant: 要約・保存の失敗は放送に影響させない。ゲストも特集も無い回は記録しない（確定 A）。
+    private func saveJournal(guest: DjProfile?, artist: ArtistProfile?) async {
+        guard let store = journalStore, let summarizer = journalSummarizer else { return }
+        let digest = BroadcastDigest(
+            date: Self.dateString(clock.now, timeZone: timeZone),
+            guestName: guest?.name, artistName: artist?.name)
+        guard digest.hasContent else { return }
+        let highlight = await summarizer.summarize(digest)
+        guard !highlight.isEmpty else { return }
+        let current = (try? store.load()) ?? .empty
+        let updated = current.appended(
+            JournalEntry(date: digest.date, highlight: highlight),
+            now: clock.now, timeZone: timeZone)
+        try? store.save(updated)
+    }
+
+    /// 当週のハイライト群を冒頭コーナー用の振り返り文へ（直近 3 件まで。空なら ""）。
+    static func journalContext(from entries: [JournalEntry]) -> String {
+        let recent = entries.suffix(3)
+        guard !recent.isEmpty else { return "" }
+        return recent.map { "・\($0.highlight)" }.joined(separator: "\n")
+    }
+
+    /// 日付文字列 "YYYY-MM-DD"（指定タイムゾーン）。
+    static func dateString(_ date: Date, timeZone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let p = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", p.year ?? 0, p.month ?? 0, p.day ?? 0)
     }
 
     /// セグメント 1 本の実行（fail-tolerant + critical 判定 + キャンセル即時伝播）。
@@ -445,7 +492,8 @@ public struct BroadcastEngine: Sendable {
         firstTalkIndex: Int?,
         greeting: String?,
         guestCornerId: String?,
-        guest: DjProfile?
+        guest: DjProfile?,
+        journalContext: String
     ) -> CornerContext {
         // アーティスト特集（仕様 s15）: その日の編成＋コーナーのリード文（{artist}/時刻は特集側で展開）。
         if segment.kind == .artistFeature {
@@ -459,8 +507,8 @@ public struct BroadcastEngine: Sendable {
             return CornerContext(castDjIds: castDjIds, greeting: nil, leadIn: leadIn, guest: guest)
         }
         if index == firstTalkIndex {
-            // 冒頭コーナー: 時刻連動の挨拶＋出演者紹介。リード文なし。
-            return CornerContext(castDjIds: castDjIds, greeting: greeting, leadIn: nil)
+            // 冒頭コーナー: 時刻連動の挨拶＋出演者紹介＋（あれば）前回の振り返り。リード文なし。
+            return CornerContext(castDjIds: castDjIds, greeting: greeting, leadIn: nil, journalContext: journalContext)
         }
         // その他: 挨拶抑制で即本題。コーナー定義の時報リード文を頭に付ける。
         let leadIn = corners.first { $0.id == segment.cornerId }?.leadIn

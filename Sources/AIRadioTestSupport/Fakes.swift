@@ -366,3 +366,20 @@ public final class PlaybackSimulator: SpotifyController, Clock, @unchecked Senda
         return duration > 0 ? min(elapsed, duration) : elapsed
     }
 }
+
+/// メモリ上の `JournalStore`（長期記憶の保存を記録。仕様 s18）。`saveCount` で保存回数を検証できる。
+public final class InMemoryJournalStore: JournalStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _journal: StationJournal
+    private var _saveCount = 0
+
+    public init(_ journal: StationJournal = .empty) { _journal = journal }
+
+    public var journal: StationJournal { lock.withLock { _journal } }
+    public var saveCount: Int { lock.withLock { _saveCount } }
+
+    public func load() throws -> StationJournal { lock.withLock { _journal } }
+    public func save(_ journal: StationJournal) throws {
+        lock.withLock { _journal = journal; _saveCount += 1 }
+    }
+}

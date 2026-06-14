@@ -93,12 +93,21 @@ public struct CornerContext: Sendable, Equatable {
     public var leadIn: String?
     /// ゲストコーナーのとき、迎えるゲスト（cast 末尾に追加。仕様 s14）。nil＝ゲストなし。
     public var guest: DjProfile?
+    /// 前回までの放送の振り返り（冒頭コーナーのみ非 nil。長期記憶。仕様 s18 §6）。空/nil＝振り返りなし。
+    public var journalContext: String?
 
-    public init(castDjIds: [String] = [], greeting: String? = nil, leadIn: String? = nil, guest: DjProfile? = nil) {
+    public init(
+        castDjIds: [String] = [],
+        greeting: String? = nil,
+        leadIn: String? = nil,
+        guest: DjProfile? = nil,
+        journalContext: String? = nil
+    ) {
         self.castDjIds = castDjIds
         self.greeting = greeting
         self.leadIn = leadIn
         self.guest = guest
+        self.journalContext = journalContext
     }
 }
 

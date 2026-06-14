@@ -3,10 +3,13 @@
 形式: `E-<CAT3>-<DETAIL>-<NNN>`。Swift では enum の case に安定コード文字列を持たせる（`RadioError.code`）。
 
 カテゴリ: CFG（設定）/ RTM（実行時）/ SPT（Spotify）/ TTS（VOICEVOX）/ LLM（Gemini・Gemma）/
-NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）/ ART（アーティスト特集）。
+NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）/ ART（アーティスト特集）/ JNL（長期記憶）。
 
 ART は **実行時の特集スキップ専用**（fail-tolerant・throw しない・診断ログ用の安定コード）。
 特集の設定不正（コーナー不在・id 衝突・artists.yaml 破損）は既存 CFG（`E-CFG-MISSING-FIELD-001`）に寄せる。
+
+JNL（ステーション・ジャーナル、S18）は **完全 fail-tolerant**: 要約 LLM 失敗・ファイル破損・保存失敗のいずれも
+握り潰して放送を継続する（専用の throw コードは設けず、診断はログのみ）。記録は ED で正常終了した回のみ。
 
 | コード | カテゴリ | 発生条件 | 導入スライス |
 |---|---|---|---|

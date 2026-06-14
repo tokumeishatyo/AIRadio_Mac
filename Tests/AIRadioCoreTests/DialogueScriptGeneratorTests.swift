@@ -242,6 +242,25 @@ struct DialogueScriptPromptTests {
         #expect(!request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず"))
     }
 
+    @Test("journalContext 非空（冒頭）: 前回の振り返りセクションと軽く触れる指示が入る（s18）")
+    func journalContextInOpening() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song, greeting: "こんばんは",
+            journalContext: "・ゲストにあんこもんさんを迎えました。")
+        #expect(request.prompt.contains("前回までの番組の振り返り"))
+        #expect(request.prompt.contains("あんこもん"))
+        #expect(request.prompt.contains("軽く一言だけ触れて"))
+    }
+
+    @Test("journalContext 空（既定）: 振り返りセクションは入らない（s18）")
+    func noJournalContextByDefault() {
+        let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")
+        let request = DialogueScriptGenerator.makeRequest(
+            corner: corner(), djs: djs, song: song, greeting: "こんばんは")
+        #expect(!request.prompt.contains("前回までの番組の振り返り"))
+    }
+
     @Test("greeting nil（既定・途中）: 挨拶・自己紹介・番組名を抑制して即本題")
     func noGreetingPromptForLaterCorner() {
         let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")

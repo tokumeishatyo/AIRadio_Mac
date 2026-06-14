@@ -233,7 +233,10 @@ AIRADIO_SPOTIFY_LOG=1    swift run AIRadioApp   # 診断: 放送中の全 Spotif
   ※ S15 アーティスト特集**ブロック本体**: 構造はライブ確認済み（ゲスト直後に1回・口上・3+3+1・曲間無音なし）。
   生成ボタンも実動作OK（artists.yaml に100組生成）。**曲被りバグを発見→修正済み**（commit `406b070`、push 済み）:
   グループ最終曲の後に pause を入れ、`play_seconds>0` でも感想（DJ発話）が鳴ったままの曲に被らないように
-  （グループ内の連続再生は維持）。**残: この fix の実放送再確認**（temp 短縮のまま再放送 → グループ末尾で曲が止まるか）。
+  （グループ内の連続再生は維持）。**fix は実放送再確認済み（2026-06-14、曲被り解消）。**
+  **次タスク（新セッションで実装）: 特集の会話の自然さ改善・確定3点** ①2回目以降のグループ紹介に連続感（「続いて、次の3曲を〜」。1回目は現状OK）
+  ②最後のグループ紹介に「最後の曲」である旨を添える ③締めを「以上、{artist}特集でした」とアーティスト名入りに。
+  **実装 spec の詳細は永続メモリ（airadio-mac-tech-decisions）に記録済み**（groupIntro に位置情報、outro_line の {artist} テンプレ化、波及テスト）。
   ※ config は現在 S15 確認用に temp 短縮中（`git checkout config/program.yaml config/corners.yaml config/research.yaml` で復元、
   `artists.yaml` は生成した100組を残すので checkout しない。`/tmp/airadio-s15-backup/` にもバックアップ）。
 - 保留中の検討課題は §11（Gemma フォールバック）。署名 .app バンドル化は S15 以降の候補。

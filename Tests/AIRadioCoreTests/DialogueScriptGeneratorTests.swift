@@ -237,6 +237,7 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("こんばんは"))
         #expect(request.prompt.contains("ケイラボAIラジオ"))
         #expect(request.prompt.contains("本日の出演者"))
+        #expect(request.prompt.contains("今日の気分"))   // s16: 冒頭の会話のフリに今日の気分
         #expect(!request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず"))
     }
 
@@ -246,6 +247,7 @@ struct DialogueScriptPromptTests {
         let request = DialogueScriptGenerator.makeRequest(corner: corner(), djs: djs, song: song)
         #expect(request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず、いきなり本題から始める"))
         #expect(!request.prompt.contains("番組の最初のコーナー"))
+        #expect(!request.prompt.contains("今日の気分"))   // s16: 今日の気分は冒頭コーナーのみ
     }
 
     @Test("guest 非 nil: ゲスト挨拶・専門家フレーミング・お礼を指示し、ゲストを出演者に含める（s14）")

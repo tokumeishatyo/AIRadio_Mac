@@ -306,6 +306,18 @@ struct CornerEngineS13_5Tests {
         #expect(recorder.events.contains(.leadIn("午前9時0分になりました。ここからはフリートークのコーナーです。")))
     }
 
+    @Test("s16: free_talk のリード文 {theme} は準備時に選択テーマで置換される（テーマ宣言リード文）")
+    func leadInThemeSubstitutedForFreeTalk() async throws {
+        let fixture = Fixture()
+        // corner().theme = 「最近気になっていること」（themePool 空＝theme 固定）。
+        let context = CornerContext(
+            castDjIds: ["metan", "zundamon"],
+            leadIn: "{ampm}{hour}時{minute}分になりました。ここからは{theme}について話そうと思います。")
+        let prepared = try await fixture.engine.prepare(corner: corner(playSeconds: 60), djs: djs, context: context)
+        // {theme} は準備時に置換、時刻プレースホルダは run 時まで残す（s16 §4）。
+        #expect(prepared.leadIn == "{ampm}{hour}時{minute}分になりました。ここからは最近気になっていることについて話そうと思います。")
+    }
+
     @Test("リード文なし（既定）なら本編のみ再生（冒頭コーナー相当）")
     func noLeadInPlaysDialogueOnly() async throws {
         let fixture = Fixture()

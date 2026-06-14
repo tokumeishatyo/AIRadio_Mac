@@ -9,7 +9,7 @@
 corners:
   - id: free_talk
     title: "フリートーク"
-    lead_in: "{ampm}{hour}時{minute}分になりました。ここからはフリートークのコーナーです。"
+    lead_in: "{ampm}{hour}時{minute}分になりました。ここからは{theme}について話そうと思います。"
     theme: "最近ちょっと気になっていること"
     themes:
       - "お酒の楽しみ方"

@@ -3,13 +3,17 @@
 形式: `E-<CAT3>-<DETAIL>-<NNN>`。Swift では enum の case に安定コード文字列を持たせる（`RadioError.code`）。
 
 カテゴリ: CFG（設定）/ RTM（実行時）/ SPT（Spotify）/ TTS（VOICEVOX）/ LLM（Gemini・Gemma）/
-NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）/ ART（アーティスト特集）/ JNL（長期記憶）。
+NEWS（News RSS）/ WX（気象庁天気）/ RES（リサーチ共通）/ ART（アーティスト特集）/ JNL（長期記憶）/
+PRON（読み辞書）。
 
 ART は **実行時の特集スキップ専用**（fail-tolerant・throw しない・診断ログ用の安定コード）。
 特集の設定不正（コーナー不在・id 衝突・artists.yaml 破損）は既存 CFG（`E-CFG-MISSING-FIELD-001`）に寄せる。
 
 JNL（ステーション・ジャーナル、S18）は **完全 fail-tolerant**: 要約 LLM 失敗・ファイル破損・保存失敗のいずれも
 握り潰して放送を継続する（専用の throw コードは設けず、診断はログのみ）。記録は ED で正常終了した回のみ。
+
+PRON（読み辞書、S19a）も **完全 fail-tolerant**: VOICEVOX 未起動・個別エントリ拒否（422・非カタカナ読み）でも
+握り潰して放送を継続する（専用の throw コードは設けず、診断はログのみ）。設定破損は CFG（`E-CFG-MISSING-FIELD-001`）。
 
 | コード | カテゴリ | 発生条件 | 導入スライス |
 |---|---|---|---|
@@ -31,3 +35,5 @@ JNL（ステーション・ジャーナル、S18）は **完全 fail-tolerant**:
 | `E-RTM-SEGMENT-FAILED-001` | RTM | 放送セグメントが実行時エラーで中断（スキップして継続） | S7 |
 | `E-ART-EMPTY-POOL-001` | ART | アーティスト特集有効だが artists.yaml が空／未生成 → 特集スキップ（throw しない・診断ログ用） | S15 |
 | `E-ART-INSUFFICIENT-TRACKS-001` | ART | 再生可能曲が 3 曲未満 → 特集スキップ（throw しない・診断ログ用） | S15 |
+| `E-PRON-SYNC-UNREACHABLE-001` | PRON | VOICEVOX に接続できず読み辞書を同期できない（GET 失敗。ログのみ・放送継続） | S19a |
+| `E-PRON-WORD-REJECTED-001` | PRON | 個別エントリの登録/更新が拒否（422 等）／読みが非カタカナ → そのエントリのみスキップ（ログのみ） | S19a |

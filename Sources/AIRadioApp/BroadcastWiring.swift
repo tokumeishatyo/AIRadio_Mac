@@ -53,11 +53,29 @@ struct BroadcastStack {
     let artists: [ArtistProfile]
     /// 放送中の操作（「ED で終了」）。
     let control: BroadcastControl
+    /// 読み辞書の同期（仕様 s19a）。放送開始時に VOICEVOX /user_dict へ冪等同期する。
+    let userDict: VoicevoxUserDict
+    /// 読み辞書のエントリ（pronunciations.yaml。空＝同期なし）。
+    let pronunciations: [PronunciationEntry]
 
     func run() async throws {
+        // 放送開始時に読み辞書を冪等同期（fail-tolerant・throw しない。仕様 s19a §5）。
+        logPronunciationSync(await userDict.sync(entries: pronunciations))
         try await engine.run(
             plan: plan, corners: corners, djs: djs, guests: guests, artists: artists, control: control)
     }
+}
+
+/// 読み辞書同期の結果を進行ログに出す（診断用。コードは error-codes.md の PRON カテゴリ）。
+func logPronunciationSync(_ summary: PronunciationSyncSummary) {
+    if summary.unreachable {
+        print("  📖 読み辞書: VOICEVOX に接続できず同期スキップ [E-PRON-SYNC-UNREACHABLE-001]")
+        return
+    }
+    guard summary.added + summary.updated + summary.failed > 0 else { return }   // 変更なしは無言。
+    var line = "  📖 読み辞書同期: 追加\(summary.added) 更新\(summary.updated) skip\(summary.skipped)"
+    if summary.failed > 0 { line += " 失敗\(summary.failed) [E-PRON-WORD-REJECTED-001]" }
+    print(line)
 }
 
 /// config/ 一式を読み込み、BroadcastEngine を配線する（fail-fast: 設定不正はここで throw）。
@@ -86,10 +104,14 @@ func makeBroadcastStack(
         : .standard
     let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
     let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    // 読み辞書（仕様 s19a）。無ければ空＝同期なし。壊れていれば throw（fail-fast、ArtistsConfigLoader と同様）。
+    let pronunciations = try PronunciationsConfigLoader.load(path: "config/pronunciations.yaml")
 
     let http = URLSessionHTTPClient()
     let auth = try makeSpotifyAuth()
     let tts = VoicevoxTTS(endpoint: ttsConfig.endpoint, http: http, speedScale: ttsConfig.speedScale)
+    // 読み辞書の同期は TTS と同じ endpoint・http を共有（仕様 s19a §7）。
+    let userDict = VoicevoxUserDict(endpoint: ttsConfig.endpoint, http: http)
     let audio = AVAudioPlayerBackend(volume: Float(ttsConfig.playbackVolume))
     // AIRADIO_SPOTIFY_LOG=1 で全 Spotify 呼び出しを経過秒付きでログ（途中切り等の診断用）。
     var spotify: any SpotifyController = try makeSpotifyController(auth: auth, http: http)
@@ -161,7 +183,8 @@ func makeBroadcastStack(
     )
     return BroadcastStack(
         engine: engine, plan: plan, corners: corners, djs: djs,
-        guests: guests, artists: artists, control: BroadcastControl())
+        guests: guests, artists: artists, control: BroadcastControl(),
+        userDict: userDict, pronunciations: pronunciations)
 }
 
 /// アーティスト一覧の生成器と設定（メニュー「アーティスト一覧を生成」用。仕様 s15 §9-3）。

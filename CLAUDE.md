@@ -24,15 +24,15 @@ AI DJ が気ままに喋り、Spotify の曲をかける。論理的進行管理
 |---|---|
 | 言語 / 並行 | Swift 6.2 / async-await + structured concurrency（Task / TaskGroup）|
 | パッケージ | Swift Package Manager（Xcode プロジェクト不要）。メニューバーは executable target で `NSApplication` を `.accessory` 化 |
-| UI | AppKit `NSStatusItem`（常駐）+ SwiftUI（最小ウィンドウ）|
+| UI | AppKit `NSStatusItem` + `NSMenu`（メニューバー常駐。専用ウィンドウは持たない）|
 | 設定 | YAML = Yams + `Codable`（外部依存パッケージは **Yams 1 つのみ**）|
 | HTTP | `URLSession`（Gemini / Spotify Web API / News RSS / 気象庁）|
 | 音声再生 | `AVFoundation`（`AVAudioPlayer`、WAV 再生 + 完了待ち）|
-| Spotify 再生制御 | AppleScript（`NSAppleScript` / `osascript`）|
-| LLM | Gemini 3.1 Flash Lite + Gemma 4 26B（Google API 無料枠）。`LLMBackend` 抽象で差し替え |
+| Spotify 再生制御 | **Web API（OAuth PKCE）**。検索・再生とも（S4 で AppleScript から移行）。AppleScript 実装は代替として残置 |
+| LLM | Gemini 3.1 Flash Lite（Google API 無料枠）。Gemma 4 26B はフォールバック候補（未実装・保留、HANDOVER §11）。`LLMBackend` 抽象で差し替え |
 | TTS | VOICEVOX（ローカル HTTP）。`TTSBackend` 抽象で将来 Google AI 音声に差し替え余地 |
 | テスト | **Swift Testing**（`@Test` / `#expect`）|
-| ログ | `os.Logger`（機密マスク）|
+| ログ | `print()`（進行ログ。秘密値は出力しない方針＝§3-3。`os.Logger` 化は将来）|
 
 ---
 

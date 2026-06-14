@@ -15,8 +15,9 @@ fi
 
 # 2) ステージされる追加行に Google API キーのパターンがあれば拒否。
 #    ソースコードやドキュメントへのコピペ混入を捕捉する。
-if git diff --cached --unified=0 | grep '^+' | grep -qE 'AIza[0-9A-Za-z_-]{35}'; then
-    echo "コミット拒否: ステージ内容に Google API キーらしき文字列（AIza...）が含まれています。" >&2
+#    旧来の AIza... 形式に加え、現行 Google AI Studio の AQ.... 形式も捕捉する。
+if git diff --cached --unified=0 | grep '^+' | grep -qE 'AIza[0-9A-Za-z_-]{35}|AQ\.[A-Za-z0-9_-]{30,}'; then
+    echo "コミット拒否: ステージ内容に Google API キーらしき文字列（AIza... / AQ....）が含まれています。" >&2
     echo "該当箇所を削除してからコミットしてください。" >&2
     exit 1
 fi

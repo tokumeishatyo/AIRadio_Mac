@@ -5,7 +5,7 @@ import AIRadioInfra
 /// メニューバー常駐 UI（仕様 s9 + s13）。📻 アイコン + メニューで放送の開始 / 停止 /
 /// ED で終了 / 番組の長さ（UserDefaults 保持）。
 @MainActor
-final class MenuBarController: NSObject, @preconcurrency NSMenuItemValidation {
+final class MenuBarController: NSObject, NSMenuItemValidation {
     /// メニュー「番組の長さ」の選択肢（仕様 s13 §5）。
     private static let lengthChoices: [ProgramLength] = [
         .corners(10), .corners(20), .corners(30), .endless,

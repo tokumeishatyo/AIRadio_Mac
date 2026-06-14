@@ -3,3 +3,6 @@
 config/*.local.yaml
 *.xcodeproj
 *.xcworkspace
+# Xcode 個人環境ファイル（SwiftPM を Xcode で開くと生成される）
+.swiftpm/xcode/xcuserdata/
+*.xcuserstate

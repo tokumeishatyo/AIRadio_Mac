@@ -16,6 +16,7 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
     private let toggleItem = NSMenuItem(title: "放送を開始", action: nil, keyEquivalent: "")
     private let endingItem = NSMenuItem(title: "ED で終了", action: nil, keyEquivalent: "")
     private let generateArtistsItem = NSMenuItem(title: "アーティスト一覧を生成", action: nil, keyEquivalent: "")
+    private let loginSpotifyItem = NSMenuItem(title: "Spotify にログイン", action: nil, keyEquivalent: "")
     private let lengthMenu = NSMenu()
     let session: BroadcastSession
     private var segmentCountLabel = "?"
@@ -23,6 +24,8 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
     private var isBroadcasting = false
     /// アーティスト一覧の生成中か（放送と相互排他。仕様 s15 §9-3）。
     private var isGeneratingArtists = false
+    /// Spotify ログイン中か（放送・生成と相互排他。仕様 s20）。
+    private var isLoggingIn = false
     private var generateTask: Task<Void, Never>?
     /// 放送中の操作ハンドル（「ED で終了」用。放送開始時にセット、idle で破棄）。
     private var activeControl: BroadcastControl?
@@ -65,6 +68,11 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
         generateArtistsItem.action = #selector(generateArtists)
         menu.addItem(generateArtistsItem)
 
+        // Spotify ログイン（PKCE。停止中のみ。トークン失効時の再ログイン用。仕様 s20）。
+        loginSpotifyItem.target = self
+        loginSpotifyItem.action = #selector(loginSpotify)
+        menu.addItem(loginSpotifyItem)
+
         menu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -94,14 +102,14 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
     /// アーティスト一覧を生成（放送停止時のみ。生成中は放送開始を抑止＝相互排他。仕様 s15 §9-3）。
     /// `artist-gen.yaml` の genre_prompt/target_count に従い LLM 生成 → Spotify 検証 → artists.yaml を上書き。
     @objc private func generateArtists() {
-        guard !isBroadcasting, !isGeneratingArtists else { return }
+        guard !isBroadcasting, !isGeneratingArtists, !isLoggingIn else { return }
         isGeneratingArtists = true
         generateArtistsItem.title = "アーティスト生成中…"
         stateItem.title = "アーティスト一覧を生成中…"
         generateTask = Task { [weak self] in
             do {
                 let (generator, config) = try makeArtistListGenerator()
-                let count = try await generator.generate(config: config, writingTo: "config/artists.yaml")
+                let count = try await generator.generate(config: config, writingTo: configPath("artists.yaml"))
                 self?.finishGenerating(result: .success(count))
             } catch is CancellationError {
                 self?.finishGenerating(result: .success(-1))   // 中止
@@ -130,6 +138,40 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
         }
     }
 
+    /// Spotify に PKCE ログイン（停止中のみ。トークン失効時の再ログイン用。仕様 s20）。
+    /// 既存の `SpotifyAuth.authorize()`（ブラウザを開いて認可）を再利用する。
+    @objc private func loginSpotify() {
+        guard !isBroadcasting, !isGeneratingArtists, !isLoggingIn else { return }
+        isLoggingIn = true
+        loginSpotifyItem.title = "Spotify ログイン中…（ブラウザで許可）"
+        Task { [weak self] in
+            do {
+                let auth = try makeSpotifyAuth()
+                try await auth.authorize()
+                self?.finishLogin(error: nil)
+            } catch {
+                self?.finishLogin(error: error)
+            }
+        }
+    }
+
+    private func finishLogin(error: (any Error)?) {
+        isLoggingIn = false
+        loginSpotifyItem.title = "Spotify にログイン"
+        let alert = NSAlert()
+        if let error {
+            alert.alertStyle = .warning
+            alert.messageText = "Spotify ログインに失敗しました"
+            alert.informativeText = (error as? RadioError).map { "[\($0.code)] \($0.message)" }
+                ?? String(describing: error)
+        } else {
+            alert.alertStyle = .informational
+            alert.messageText = "Spotify にログインしました"
+            alert.informativeText = "認証情報を Keychain に保存しました。"
+        }
+        alert.runModal()
+    }
+
     @objc private func selectLength(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String else { return }
         UserDefaults.standard.set(raw, forKey: programLengthDefaultsKey)
@@ -145,22 +187,23 @@ final class MenuBarController: NSObject, NSMenuItemValidation {
 
     /// 現在の選択値（UserDefaults → program.yaml の既定値の順）。
     private func currentLengthSelection() -> ProgramLength {
-        let defaultLength = (try? ProgramConfigLoader.load(path: "config/program.yaml"))?.defaultLength
+        let defaultLength = (try? ProgramConfigLoader.load(path: configPath("program.yaml")))?.defaultLength
             ?? .corners(10)
         return selectedProgramLength(defaultLength: defaultLength)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem === endingItem { return isBroadcasting && activeControl != nil }
-        // 生成中はボタン無効、放送中もボタン無効（相互排他）。
-        if menuItem === generateArtistsItem { return !isBroadcasting && !isGeneratingArtists }
-        // 生成中は「放送を開始」を無効化（放送中なら「停止」として有効）。
-        if menuItem === toggleItem { return isBroadcasting || !isGeneratingArtists }
+        // 生成中・ログイン中はボタン無効、放送中もボタン無効（相互排他）。
+        if menuItem === generateArtistsItem { return !isBroadcasting && !isGeneratingArtists && !isLoggingIn }
+        if menuItem === loginSpotifyItem { return !isBroadcasting && !isGeneratingArtists && !isLoggingIn }
+        // 生成中・ログイン中は「放送を開始」を無効化（放送中なら「停止」として有効）。
+        if menuItem === toggleItem { return isBroadcasting || (!isGeneratingArtists && !isLoggingIn) }
         return true
     }
 
     private func startBroadcast() async {
-        guard !isGeneratingArtists else { return }   // 生成中は開始しない（相互排他）。
+        guard !isGeneratingArtists, !isLoggingIn else { return }   // 生成・ログイン中は開始しない（相互排他）。
         let stack: BroadcastStack
         do {
             stack = try makeBroadcastStack(

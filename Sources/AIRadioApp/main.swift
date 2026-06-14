@@ -19,7 +19,7 @@ setvbuf(stdout, nil, _IOLBF, 0)
 func runTtsDemo() async {
     print("ケイラボAIラジオ Mac版 — TTS デモ（VOICEVOX）")
     do {
-        let config = try TtsConfigLoader.load(path: "config/tts.yaml")
+        let config = try TtsConfigLoader.load(path: configPath("tts.yaml"))
         let tts = VoicevoxTTS(endpoint: config.endpoint, http: URLSessionHTTPClient(), speedScale: config.speedScale)
         let wav = try await tts.synthesize(text: "こんにちは。ケイラボAIラジオのテストなのだ。", speakerId: 3)
         print("合成成功: \(wav.count) bytes")
@@ -49,7 +49,7 @@ func runSpotifyAuthDemo() async {
 func runSpotifyDemo() async {
     print("ケイラボAIラジオ Mac版 — Spotify デモ（検索 + Web API 再生）")
     do {
-        let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+        let config = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
         let auth = try makeSpotifyAuth()
         let http = URLSessionHTTPClient()
         let searcher = SpotifyWebSearcher(auth: auth, market: config.market, http: http)
@@ -80,9 +80,9 @@ func runSpotifyDemo() async {
 func runThemeDemo() async {
     print("ケイラボAIラジオ Mac版 — 統一テーマエンジン デモ（OP / ニュース / ED）")
     do {
-        let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
-        let research = try ResearchConfigLoader.load(path: "config/research.yaml")
-        let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
+        let themes = try ThemeConfigLoader.load(path: configPath("themes.yaml"))
+        let research = try ResearchConfigLoader.load(path: configPath("research.yaml"))
+        let ttsConfig = try TtsConfigLoader.load(path: configPath("tts.yaml"))
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
         let sequencer = ThemeSequencer(
@@ -133,15 +133,15 @@ func runThemeDemo() async {
 func runNewsDemo() async {
     print("ケイラボAIラジオ Mac版 — ニュース原稿デモ（LLM アナウンサー原稿、音声なし）")
     do {
-        let research = try ResearchConfigLoader.load(path: "config/research.yaml")
+        let research = try ResearchConfigLoader.load(path: configPath("research.yaml"))
         let http = URLSessionHTTPClient()
         let news = NewsRssSource(url: research.newsRssUrl, maxItems: research.newsMaxItems, http: http)
         let weather = JmaWeatherSource(
             areaCode: research.weatherAreaCode, areaName: research.weatherAreaName, http: http)
 
         let provider: any AnnouncementProviding
-        if let llmConfig = try? LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml") {
-            let djs = (try? DjsConfigLoader.load(path: "config/djs.yaml")) ?? []
+        if let llmConfig = try? LlmConfigLoader.load(path: configPath("llm.yaml"), localPath: configPath("llm.local.yaml")) {
+            let djs = (try? DjsConfigLoader.load(path: configPath("djs.yaml"))) ?? []
             provider = LlmNewsScriptProvider(
                 news: news,
                 weather: weather,
@@ -168,14 +168,14 @@ func runNewsDemo() async {
 func runCornerDemo() async {
     print("ケイラボAIラジオ Mac版 — 会話コーナー デモ（LLM 台本 → DJ 二人 → 一曲）")
     do {
-        let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
-        let djs = try DjsConfigLoader.load(path: "config/djs.yaml")
-        let corners = try CornersConfigLoader.load(path: "config/corners.yaml")
+        let llmConfig = try LlmConfigLoader.load(path: configPath("llm.yaml"), localPath: configPath("llm.local.yaml"))
+        let djs = try DjsConfigLoader.load(path: configPath("djs.yaml"))
+        let corners = try CornersConfigLoader.load(path: configPath("corners.yaml"))
         guard let corner = corners.first else {
             throw ConfigError.missingField("corners")
         }
-        let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
-        let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+        let ttsConfig = try TtsConfigLoader.load(path: configPath("tts.yaml"))
+        let spotifyConfig = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
         let http = URLSessionHTTPClient()
         let auth = try makeSpotifyAuth()
         let engine = CornerEngine(
@@ -266,8 +266,8 @@ struct LoggingSpotifyController: SpotifyController {
 func runTrackWatchDemo() async {
     print("ケイラボAIラジオ Mac版 — trackwatch 診断（OP 遷移再現 + フル再生監視）")
     do {
-        let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
-        let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+        let themes = try ThemeConfigLoader.load(path: configPath("themes.yaml"))
+        let config = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
         let auth = try makeSpotifyAuth()
         let http = URLSessionHTTPClient()
         let searcher = SpotifyWebSearcher(auth: auth, market: config.market, http: http)

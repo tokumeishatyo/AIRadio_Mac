@@ -6,3 +6,6 @@ config/*.local.yaml
 # Xcode 個人環境ファイル（SwiftPM を Xcode で開くと生成される）
 .swiftpm/xcode/xcuserdata/
 *.xcuserstate
+
+# パッケージ出力（.app バンドル。仕様 s20）
+dist/

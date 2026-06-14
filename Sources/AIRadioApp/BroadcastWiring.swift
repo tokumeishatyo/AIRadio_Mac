@@ -5,7 +5,7 @@ import AIRadioInfra
 let spotifyScopes = ["user-read-playback-state", "user-modify-playback-state"]
 
 func makeSpotifyAuth() throws -> SpotifyAuth {
-    let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    let config = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
     return SpotifyAuth(
         clientId: config.clientId,
         redirectUri: config.redirectUri,
@@ -18,7 +18,7 @@ func makeSpotifyAuth() throws -> SpotifyAuth {
 }
 
 func makeSpotifyController(auth: SpotifyAuth, http: any HTTPClient) throws -> WebApiSpotifyController {
-    let config = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    let config = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
     return WebApiSpotifyController(auth: auth, http: http, preferredDeviceName: config.deviceName)
 }
 
@@ -85,27 +85,27 @@ func makeBroadcastStack(
     onCornerEvent: (@Sendable (CornerEvent) -> Void)? = nil,
     onArtistFeatureEvent: (@Sendable (ArtistFeatureEvent) -> Void)? = nil
 ) throws -> BroadcastStack {
-    let blueprint = try ProgramConfigLoader.load(path: "config/program.yaml")
-    let themes = try ThemeConfigLoader.load(path: "config/themes.yaml")
-    let research = try ResearchConfigLoader.load(path: "config/research.yaml")
-    let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
-    let djs = try DjsConfigLoader.load(path: "config/djs.yaml")
-    let corners = try CornersConfigLoader.load(path: "config/corners.yaml")
+    let blueprint = try ProgramConfigLoader.load(path: configPath("program.yaml"))
+    let themes = try ThemeConfigLoader.load(path: configPath("themes.yaml"))
+    let research = try ResearchConfigLoader.load(path: configPath("research.yaml"))
+    let llmConfig = try LlmConfigLoader.load(path: configPath("llm.yaml"), localPath: configPath("llm.local.yaml"))
+    let djs = try DjsConfigLoader.load(path: configPath("djs.yaml"))
+    let corners = try CornersConfigLoader.load(path: configPath("corners.yaml"))
     // ゲストプール（ゲストコーナー有効時に使用）。ファイルが無ければ空（ゲストコーナー無効時はそれでよい）。
     // ファイルが存在するのに壊れている場合は握り潰さず起動エラーにする（後で「プールが空」と誤誘導しないため）。
-    let guests: [DjProfile] = FileManager.default.fileExists(atPath: "config/guests.yaml")
-        ? try GuestsConfigLoader.load(path: "config/guests.yaml")
+    let guests: [DjProfile] = FileManager.default.fileExists(atPath: configPath("guests.yaml"))
+        ? try GuestsConfigLoader.load(path: configPath("guests.yaml"))
         : []
     // アーティスト特集のプール（仕様 s15）。出荷時は空＝特集スキップ。壊れている場合のみ throw。
-    let artists = try ArtistsConfigLoader.load(path: "config/artists.yaml")
+    let artists = try ArtistsConfigLoader.load(path: configPath("artists.yaml"))
     // 暦コンテキスト（曜日名・記念日。仕様 s17）。ファイルが無ければ標準（曜日名のみ・記念日なし）。
-    let dailyCalendar: DailyCalendar = FileManager.default.fileExists(atPath: "config/calendar.yaml")
-        ? try DailyCalendarLoader.load(path: "config/calendar.yaml")
+    let dailyCalendar: DailyCalendar = FileManager.default.fileExists(atPath: configPath("calendar.yaml"))
+        ? try DailyCalendarLoader.load(path: configPath("calendar.yaml"))
         : .standard
-    let ttsConfig = try TtsConfigLoader.load(path: "config/tts.yaml")
-    let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    let ttsConfig = try TtsConfigLoader.load(path: configPath("tts.yaml"))
+    let spotifyConfig = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
     // 読み辞書（仕様 s19a）。無ければ空＝同期なし。壊れていれば throw（fail-fast、ArtistsConfigLoader と同様）。
-    let pronunciations = try PronunciationsConfigLoader.load(path: "config/pronunciations.yaml")
+    let pronunciations = try PronunciationsConfigLoader.load(path: configPath("pronunciations.yaml"))
 
     let http = URLSessionHTTPClient()
     let auth = try makeSpotifyAuth()
@@ -173,7 +173,7 @@ func makeBroadcastStack(
         spotify: spotify,
         clock: clock,
         // 長期記憶（仕様 s18）: config/journal.local.yaml に週次でハイライトを記録し冒頭で振り返る。
-        journalStore: YamlJournalStore(path: "config/journal.local.yaml"),
+        journalStore: YamlJournalStore(path: configPath("journal.local.yaml")),
         journalSummarizer: JournalSummarizer(llm: GeminiLLMBackend(config: llmConfig, http: http)),
         onEvent: onBroadcastEvent
     )
@@ -192,15 +192,15 @@ func makeBroadcastStack(
 /// アーティスト一覧の生成器と設定（メニュー「アーティスト一覧を生成」用。仕様 s15 §9-3）。
 /// LLM + Spotify 検索のみ（TTS・再生デバイス不要）。
 func makeArtistListGenerator() throws -> (generator: ArtistListGenerator, config: ArtistGenConfig) {
-    let llmConfig = try LlmConfigLoader.load(path: "config/llm.yaml", localPath: "config/llm.local.yaml")
-    let spotifyConfig = try SpotifyConfigLoader.load(path: "config/spotify.local.yaml")
+    let llmConfig = try LlmConfigLoader.load(path: configPath("llm.yaml"), localPath: configPath("llm.local.yaml"))
+    let spotifyConfig = try SpotifyConfigLoader.load(path: configPath("spotify.local.yaml"))
     let http = URLSessionHTTPClient()
     let auth = try makeSpotifyAuth()
     let generator = ArtistListGenerator(
         llm: GeminiLLMBackend(config: llmConfig, http: http),
         catalog: SpotifyArtistCatalog(auth: auth, market: spotifyConfig.market, http: http)
     )
-    let genConfig = try ArtistGenConfigLoader.load(path: "config/artist-gen.yaml")
+    let genConfig = try ArtistGenConfigLoader.load(path: configPath("artist-gen.yaml"))
     return (generator, genConfig)
 }
 

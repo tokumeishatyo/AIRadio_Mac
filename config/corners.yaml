@@ -95,4 +95,4 @@ corners:
     group_intro_target_chars: 320
     comment_target_chars: 400
     comment_short_target_chars: 240
-    outro_line: "以上、アーティスト特集でした。"
+    outro_line: "以上、{artist}特集でした。"

@@ -172,6 +172,62 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("伝染させない"))
     }
 
+    // MARK: - S15 fix: グループ紹介の連続感・ラスト明示（会話の自然さ改善）
+
+    private func featureTracks(_ n: Int) -> [TrackInfo] {
+        (1...n).map { TrackInfo(uri: "spotify:track:T\($0)", title: "ソング\($0)", artist: "歌手") }
+    }
+
+    private func groupIntroRequest(index: Int, total: Int, tracks: Int = 3) -> LLMRequest {
+        DialogueScriptGenerator.makeArtistFeatureRequest(
+            part: .groupIntro(tracks: featureTracks(tracks), index: index, total: total),
+            artistName: "米津玄師", djs: djs, targetCharacters: 320)
+    }
+
+    @Test("1 回目のグループ紹介（index 0・複数）: 連続感・ラスト指示は入らない（従来どおり）")
+    func firstGroupIntroIsPlain() {
+        let prompt = groupIntroRequest(index: 0, total: 3).prompt
+        #expect(!prompt.contains("進行中"))
+        #expect(!prompt.contains("引き続き"))
+        #expect(!prompt.contains("最後"))
+    }
+
+    @Test("2 回目以降の中盤グループ紹介（index 1/total 3）: 進行中の特集を続けるつなぎ・新規開始の言い方を禁止")
+    func middleGroupIntroHasContinuity() {
+        let prompt = groupIntroRequest(index: 1, total: 3).prompt
+        #expect(prompt.contains("進行中"))               // すでに進行中の特集
+        #expect(prompt.contains("引き続き"))             // 「引き続き〇〇の曲を」のつなぎ
+        #expect(prompt.contains("新しく始めるような言い方"))  // 「続いては〇〇特集」を禁止（fix2）
+        #expect(prompt.contains("やり直さず"))
+        #expect(!prompt.contains("最後"))
+    }
+
+    @Test("最後のグループ紹介（index 2/total 3）: 連続感＋ラスト明示（曲数入り）")
+    func lastGroupIntroIsMarkedLast() {
+        let prompt = groupIntroRequest(index: 2, total: 3, tracks: 1).prompt
+        #expect(prompt.contains("引き続き"))               // 最後も 2 回目以降なので連続感は出す
+        #expect(prompt.contains("最後である旨"))
+        #expect(prompt.contains("最後はこの 1 曲"))         // 曲数に応じた文言
+    }
+
+    @Test("ラスト明示は曲数に応じる: K=5→[3,2] の最後 2 曲、K=6→[3,3] の最後 3 曲（縮約・index1/total2 経路）")
+    func lastGroupMarkerMatchesTrackCount() {
+        // 確定要件②「縮約で複数曲のこともあるので曲数に応じて」。最後グループが 1 曲でない経路を担保。
+        let twoSongs = groupIntroRequest(index: 1, total: 2, tracks: 2).prompt
+        #expect(twoSongs.contains("最後はこの 2 曲"))
+        #expect(twoSongs.contains("引き続き"))             // index1=2 回目なので連続感も出す
+        let threeSongs = groupIntroRequest(index: 1, total: 2, tracks: 3).prompt
+        #expect(threeSongs.contains("最後はこの 3 曲"))
+    }
+
+    @Test("唯一のグループ紹介（index 0/total 1＝K3）: 1 回目扱い＝連続感もラスト指示も入らない")
+    func singleGroupIntroIsPlain() {
+        let prompt = groupIntroRequest(index: 0, total: 1).prompt
+        #expect(!prompt.contains("進行中"))
+        #expect(!prompt.contains("引き続き"))
+        #expect(!prompt.contains("最後"))
+    }
+
     @Test("greeting 非 nil（冒頭）: 時刻連動の挨拶＋番組名＋出演者紹介を指示")
     func greetingPromptForOpeningCorner() {
         let song = TrackInfo(uri: "spotify:track:X", title: "曲", artist: "歌手")

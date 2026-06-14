@@ -14,7 +14,7 @@ private func featureCorner(playSeconds: Int = 1) -> CornerTemplate {
         format: .artistFeature, djIds: ["zundamon", "metan"],
         fallbackTrackUri: "spotify:track:F", volume: 100, playSeconds: playSeconds,
         leadIn: "{ampm}{hour}時です。本日は{artist}さんを特集します。",
-        artistFeatureParams: ArtistFeatureParams(outroLine: "以上、アーティスト特集でした。")
+        artistFeatureParams: ArtistFeatureParams(outroLine: "以上、{artist}特集でした。")
     )
 }
 
@@ -75,7 +75,8 @@ struct ArtistFeatureEngineTests {
         #expect(prepared.groups.map(\.count) == [3, 3, 1])
         #expect(prepared.groupIntroScripts.count == 3)
         #expect(prepared.commentScripts.count == 2)   // 最後のグループの後は締め＝感想なし
-        #expect(prepared.outroLine.text == "以上、アーティスト特集でした。")
+        #expect(prepared.outroLine.text == "以上、米津玄師特集でした。")   // {artist} が準備時に実名へ置換される
+
         #expect(prepared.leadIn?.contains("米津玄師") == true)
         #expect(prepared.introAudio.count == prepared.introScript.lines.count)
     }

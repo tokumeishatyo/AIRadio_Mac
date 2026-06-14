@@ -63,7 +63,7 @@ public struct ArtistFeatureParams: Sendable, Equatable {
     public var commentTargetChars: Int
     /// 2 回目以降の感想の目標文字数（1 回目より短く）。
     public var commentShortTargetChars: Int
-    /// 締めの固定文（LLM 生成しない。「アーティスト特集でした。」を含む）。
+    /// 締めの固定文（LLM 生成しない。`{artist}` は準備時にアーティスト名へ展開。「特集でした。」を含む）。
     public var outroLine: String
 
     public init(
@@ -71,7 +71,7 @@ public struct ArtistFeatureParams: Sendable, Equatable {
         groupIntroTargetChars: Int = 320,
         commentTargetChars: Int = 400,
         commentShortTargetChars: Int = 240,
-        outroLine: String = "以上、アーティスト特集でした。"
+        outroLine: String = "以上、{artist}特集でした。"
     ) {
         self.introTargetChars = introTargetChars
         self.groupIntroTargetChars = groupIntroTargetChars

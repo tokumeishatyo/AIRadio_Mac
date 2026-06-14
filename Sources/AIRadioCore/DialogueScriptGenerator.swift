@@ -156,12 +156,26 @@ public struct DialogueScriptGenerator: Sendable {
             sections = ["ラジオ番組のアーティスト特集の「導入」の会話台本を書いてください。"]
             constraints.append("メイン「\(main)」が『ここからはアーティスト特集』と宣言し、本日特集するアーティスト「\(artistName)」への思いや好きなところを一言添える。")
             constraints.append("まだ曲名には触れない（曲の紹介は次のパートで行う）。")
-        case .groupIntro(let tracks):
+        case .groupIntro(let tracks, let index, let total):
+            let isFirst = index == 0
+            let isLast = index == total - 1
             let list = tracks.map { "「\($0.title)」（\($0.artist)）" }.joined(separator: "、")
             sections = ["ラジオ番組のアーティスト特集で、これから連続で流す \(tracks.count) 曲をまとめて紹介する会話台本を書いてください。"]
             sections.append("# 紹介する曲（この順で）\n\(list)")
             constraints.append("上の曲を順に紹介する。曲名・アーティスト名は与えられた表記を一字一句そのまま言い、言い換え・推測・別情報の捏造をしない。")
-            constraints.append("各曲に聴きどころを軽く添え、最後は曲へ送り出して締める。")
+            if isFirst {
+                // 1 回目（または唯一）のグループ: 従来どおり自然に曲紹介へ入る（仕様 s15 §7）。
+                constraints.append("各曲に聴きどころを軽く添え、曲へ送り出して締める。")
+            } else {
+                // 2 回目以降のグループ: すでに進行中の特集を「続ける」つなぎにする。
+                // 「続いては〇〇特集」のように新しく特集が始まる言い方は禁止（ライブ確認 fix2、仕様 s15 §7）。
+                constraints.append("この特集は「\(artistName)」特集としてすでに進行中で、前のグループを聴き終えたところ。「\(artistName)特集です」と新しく始めるような言い方（「続いては\(artistName)特集」など）は禁止。「引き続き\(artistName)の曲を」「同じ\(artistName)から、次は」のように、いま進行中の特集をそのまま続けるつなぎで前を受ける。アーティストの紹介はやり直さず、曲の紹介に集中する。")
+                constraints.append("各曲に聴きどころを軽く添え、曲へ送り出して締める。")
+            }
+            if isLast && !isFirst {
+                // 最後のグループ: 曲数に応じてラストである旨を一言添える（縮約で 1〜3 曲、仕様 s15 §7）。
+                constraints.append("これが特集で流す最後のグループ。「最後はこの \(tracks.count) 曲」のように、曲数（\(tracks.count) 曲）に応じて最後である旨を一言添える。")
+            }
         case .comment(let shorter):
             sections = ["ラジオ番組のアーティスト特集で、今流した曲を聴いたあとの感想・雑談の会話台本を書いてください。"]
             constraints.append(shorter

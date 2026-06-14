@@ -22,7 +22,8 @@ public enum ArtistFeaturePart: Sendable, Equatable {
     /// 導入（特集宣言＋アーティストへの思い一言）。
     case intro
     /// グループの曲紹介（その曲を正確な曲名で紹介）。
-    case groupIntro(tracks: [TrackInfo])
+    /// `index`（0 始まり）/ `total`（全グループ数）で連続感・ラスト明示を出し分ける（仕様 s15 §7）。
+    case groupIntro(tracks: [TrackInfo], index: Int, total: Int)
     /// 感想（`shorter` = 2 回目以降の短い感想）。
     case comment(shorter: Bool)
 }
@@ -206,9 +207,9 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
         let introScript = try await generatePart(.intro, artist: artist, cast: cast,
                                                  dateContext: dateContext, target: params.introTargetChars)
         var groupIntroScripts: [DialogueScript] = []
-        for group in groups {
+        for (index, group) in groups.enumerated() {
             groupIntroScripts.append(try await generatePart(
-                .groupIntro(tracks: group), artist: artist, cast: cast,
+                .groupIntro(tracks: group, index: index, total: groups.count), artist: artist, cast: cast,
                 dateContext: dateContext, target: params.groupIntroTargetChars))
         }
         var commentScripts: [DialogueScript] = []
@@ -220,7 +221,9 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
                     target: shorter ? params.commentShortTargetChars : params.commentTargetChars))
             }
         }
-        let outroLine = DialogueLine(djId: cast[0].id, text: params.outroLine)
+        // 締めの {artist} を準備時に実名へ展開（leadIn の {artist} 置換と同型。仕様 s15 §7）。
+        let outroText = params.outroLine.replacingOccurrences(of: "{artist}", with: artist.name)
+        let outroLine = DialogueLine(djId: cast[0].id, text: outroText)
 
         // 事前合成（本番の TTS 待ちゼロ。締めの固定文も合成）。
         let introAudio = try await synthesize(introScript, cast: cast)

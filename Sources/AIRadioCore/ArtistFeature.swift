@@ -324,7 +324,7 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
         try await audio.play(prepared.outroAudio)
     }
 
-    /// グループ内を連続再生（曲間に pause を挟まず次 URI を直接 play＝アトミック置換でシームレス）。
+    /// グループ内を連続再生（曲間は pause を挟まずアトミック置換でシームレス）し、グループの最後に pause して次の発話へ。
     private func playGroup(_ tracks: [TrackInfo], corner: CornerTemplate) async throws {
         for track in tracks {
             try await spotify.play(uri: track.uri)
@@ -337,6 +337,10 @@ public struct ArtistFeatureEngine: ArtistFeatureRunning, Sendable {
                 onEvent?(.songFinished(reason: reason))
             }
         }
+        // グループ最終曲の後は音楽を止めてから次の発話（感想/グループ紹介/締め）に入る（曲被り防止、仕様 s15 §8）。
+        // play_seconds>0 だと最終曲が鳴り続けるため必須。フル再生(=0)では自然終了済みで no-op（pause はベストエフォート）。
+        // 曲間（グループ内）では pause しない＝連続再生は維持。
+        try await spotify.pause()
     }
 
     private func speak(_ script: DialogueScript, lineAudio: [Data], cast: [DjProfile]) async throws {

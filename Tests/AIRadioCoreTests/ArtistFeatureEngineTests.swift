@@ -121,8 +121,14 @@ struct ArtistFeatureEngineTests {
         try await engine.run(prepared: prepared, djs: djs)
 
         #expect(playCount(spotify.events) == 4)
-        #expect(spotify.events.filter { $0 == .pause }.count == 1)
+        // 各グループの後に pause（[3,1] の 2 グループ）＋ run 末尾の pause = 3。
+        #expect(spotify.events.filter { $0 == .pause }.count == 3)
         #expect(spotify.events.last == .pause)
+        // グループ1（3曲）は曲間に pause を挟まず連続: 最初の pause より前に play が 3 つ。
+        let firstPause = spotify.events.firstIndex(of: .pause) ?? spotify.events.count
+        let group1Plays = spotify.events.prefix(firstPause)
+            .filter { if case .play = $0 { return true } else { return false } }.count
+        #expect(group1Plays == 3)
         #expect(collector.items.filter { if case .songStarted = $0 { return true } else { return false } }.count == 4)
         #expect(!collector.items.contains { if case .featureSkipped = $0 { return true } else { return false } })
         #expect(audio.played.last == prepared.outroAudio)

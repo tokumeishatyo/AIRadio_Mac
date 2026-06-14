@@ -238,6 +238,7 @@ struct DialogueScriptPromptTests {
         #expect(request.prompt.contains("ケイラボAIラジオ"))
         #expect(request.prompt.contains("本日の出演者"))
         #expect(request.prompt.contains("今日の気分"))   // s16: 冒頭の会話のフリに今日の気分
+        #expect(request.prompt.contains("具体的な時刻・時間帯は断定しない"))  // s17 fix: 「深夜」等の誤時刻を禁止
         #expect(!request.prompt.contains("挨拶・自己紹介・番組名の名乗りはせず"))
     }
 

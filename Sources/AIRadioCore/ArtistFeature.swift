@@ -4,10 +4,13 @@ import Foundation
 public struct ArtistProfile: Sendable, Equatable {
     public var id: String
     public var name: String
+    /// カタカナ読み（任意。仕様 s19b。VOICEVOX ユーザー辞書へ登録される。nil = 読み未登録）。
+    public var reading: String?
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, reading: String? = nil) {
         self.id = id
         self.name = name
+        self.reading = reading
     }
 }
 

@@ -200,4 +200,32 @@ struct VoicevoxUserDictTests {
         #expect(!VoicevoxUserDict.isKatakana("Mr"))             // 英字
         #expect(!VoicevoxUserDict.isKatakana(""))
     }
+
+    // MARK: mergedEntries（S19b: pronunciations.yaml ＋ artists.yaml の reading 統合）
+
+    @Test("mergedEntries: pronunciations 優先で artist reading を統合（reading=nil は対象外）")
+    func mergedEntriesCombines() {
+        let merged = VoicevoxUserDict.mergedEntries(
+            pronunciations: [PronunciationEntry(surface: "栄光の架橋", pronunciation: "エイコウノカケハシ")],
+            artists: [
+                ArtistProfile(id: "a1", name: "Mr.Children", reading: "ミスターチルドレン"),
+                ArtistProfile(id: "a2", name: "あいみょん"),   // reading nil → 除外
+            ])
+        #expect(merged.count == 2)
+        #expect(merged[0].surface == "栄光の架橋")   // pronunciations が先頭
+        let artistEntry = merged.first { $0.surface == "Mr.Children" }
+        #expect(artistEntry?.pronunciation == "ミスターチルドレン")
+        #expect(artistEntry?.wordType == "PROPER_NOUN")
+        #expect(artistEntry?.accentType == 0)
+        #expect(!merged.contains { $0.surface == "あいみょん" })
+    }
+
+    @Test("mergedEntries: surface 重複は NFKC 突合で pronunciations が勝つ")
+    func mergedEntriesPronunciationsWin() {
+        let merged = VoicevoxUserDict.mergedEntries(
+            pronunciations: [PronunciationEntry(surface: "Mr.Children", pronunciation: "ミスチル")],
+            artists: [ArtistProfile(id: "a1", name: toFullWidth("Mr.Children"), reading: "ミスターチルドレン")])
+        #expect(merged.count == 1)
+        #expect(merged[0].pronunciation == "ミスチル")   // 明示指定（pronunciations.yaml）が優先
+    }
 }

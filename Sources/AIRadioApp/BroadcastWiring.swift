@@ -184,7 +184,9 @@ func makeBroadcastStack(
     return BroadcastStack(
         engine: engine, plan: plan, corners: corners, djs: djs,
         guests: guests, artists: artists, control: BroadcastControl(),
-        userDict: userDict, pronunciations: pronunciations)
+        userDict: userDict,
+        // 読み辞書 = pronunciations.yaml ＋ artists.yaml の reading（仕様 s19b。pronunciations 優先）。
+        pronunciations: VoicevoxUserDict.mergedEntries(pronunciations: pronunciations, artists: artists))
 }
 
 /// アーティスト一覧の生成器と設定（メニュー「アーティスト一覧を生成」用。仕様 s15 §9-3）。

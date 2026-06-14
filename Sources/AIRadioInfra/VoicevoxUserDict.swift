@@ -156,4 +156,22 @@ public struct VoicevoxUserDict: Sendable {
                 || scalar.value == 0x30FC              // ー（長音）
         }
     }
+
+    /// `pronunciations.yaml`（明示・優先）＋ `artists.yaml` の reading を統合して同期エントリ列にする（仕様 s19b §4）。
+    /// surface の重複は NFKC キー（`matchKey`）で先勝ち＝pronunciations.yaml が勝つ。reading=nil のアーティストは対象外。
+    public static func mergedEntries(
+        pronunciations: [PronunciationEntry],
+        artists: [ArtistProfile]
+    ) -> [PronunciationEntry] {
+        var result = pronunciations
+        var seen = Set(pronunciations.map { matchKey($0.surface) })
+        for artist in artists {
+            guard let reading = artist.reading, !reading.isEmpty else { continue }
+            guard seen.insert(matchKey(artist.name)).inserted else { continue }
+            result.append(PronunciationEntry(
+                surface: artist.name, pronunciation: reading,
+                accentType: 0, wordType: "PROPER_NOUN"))
+        }
+        return result
+    }
 }

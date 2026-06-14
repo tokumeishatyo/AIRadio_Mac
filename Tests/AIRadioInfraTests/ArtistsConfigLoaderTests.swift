@@ -56,4 +56,20 @@ struct ArtistsConfigLoaderTests {
     func missingFileIsEmpty() throws {
         #expect(try ArtistsConfigLoader.load(path: "/no/such/artists.yaml") == [])
     }
+
+    @Test("reading: 任意（仕様 s19b）。あれば読む・無ければ nil（後方互換）")
+    func readingOptional() throws {
+        let yaml = """
+        artists:
+          - id: artist_001
+            name: "米津玄師"
+            reading: "ヨネヅケンシ"
+          - id: artist_002
+            name: "あいみょん"
+        """
+        #expect(try ArtistsConfigLoader.load(yaml: yaml) == [
+            ArtistProfile(id: "artist_001", name: "米津玄師", reading: "ヨネヅケンシ"),
+            ArtistProfile(id: "artist_002", name: "あいみょん", reading: nil),
+        ])
+    }
 }

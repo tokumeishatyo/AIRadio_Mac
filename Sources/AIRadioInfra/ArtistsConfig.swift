@@ -10,6 +10,7 @@ public enum ArtistsConfigLoader {
         struct Artist: Decodable {
             let id: String?
             let name: String?
+            let reading: String?   // 任意（仕様 s19b。カタカナ読み）
         }
         let artists: [Artist]?
     }
@@ -40,7 +41,7 @@ public enum ArtistsConfigLoader {
             guard canonical.isEmpty || seenName.insert(canonical).inserted else {
                 throw ConfigError.missingField("artists[].name が重複: \(name)")
             }
-            return ArtistProfile(id: id, name: name)
+            return ArtistProfile(id: id, name: name, reading: artist.reading)
         }
     }
 
